@@ -4,21 +4,30 @@ class StockService {
   /**
    * Atomically decrements variant stock using document-level conditional locking.
    *
-   * Condition:
-   * 1. Product exists and is active
-   * 2. Embedded variant exists, is active, AND currently has stock >= requested quantity
+   * WHY $elemMatch IS STRICTLY MANDATORY:
+   * When querying an array of embedded documents in MongoDB:
+   * Using separate field paths like:
+   *   { "variants._id": variantId, "variants.stock": { $gte: quantity } }
+   * evaluates conditions independently across ALL elements in the array!
+   * If Variant A has ID `variantId` but stock = 0, and Variant B has a different ID
+   * but stock = 5, the non-elemMatch query matches the document! Then, `variants.$.stock`
+   * modifies whichever element matched the first criteria, resulting in silent inventory corruption!
    *
-   * Mutation:
-   * Uses $inc to decrement stock atomically in a single database operation.
+   * The `$elemMatch` operator forces MongoDB to find a SINGLE array element that satisfies
+   * BOTH criteria simultaneously:
+   * 1. The embedded variant's _id === variantId
+   * 2. THAT SAME variant's stock >= requested quantity
    *
-   * Why this defeats race conditions:
-   * In a naive "read stock -> verify >= qty -> update stock" flow, two concurrent requests
-   * both read stock = 1 and both execute updates, leaving stock = -1 (overselling).
-   * By embedding the condition `stock: { $gte: quantity }` directly into the write predicate,
-   * MongoDB's document-level ACID lock guarantees that only the first write matches and executes.
-   * The second concurrent write matches 0 documents and fails safely.
+   * @param {Object} params
+   * @param {string|mongoose.Types.ObjectId} params.productId
+   * @param {string|mongoose.Types.ObjectId} params.variantId
+   * @param {number} params.quantity
+   * @param {mongoose.ClientSession} [params.session] Optional MongoDB transaction session
+   * @returns {Promise<boolean>} True if stock was decremented, false otherwise
    */
-  static async decrementVariantStock({ productId, variantId, quantity }) {
+  static async decrementVariantStock({ productId, variantId, quantity, session = null }) {
+    const options = session ? { session } : {};
+
     const result = await Product.updateOne(
       {
         _id: productId,
@@ -32,7 +41,40 @@ class StockService {
       },
       {
         $inc: { "variants.$.stock": -quantity }
-      }
+      },
+      options
+    );
+
+    return result.matchedCount > 0 && result.modifiedCount > 0;
+  }
+
+  /**
+   * Atomically restores variant stock upon order cancellation.
+   * Uses $elemMatch to guarantee stock is added to the exact variant.
+   *
+   * @param {Object} params
+   * @param {string|mongoose.Types.ObjectId} params.productId
+   * @param {string|mongoose.Types.ObjectId} params.variantId
+   * @param {number} params.quantity
+   * @param {mongoose.ClientSession} [params.session] Optional MongoDB transaction session
+   * @returns {Promise<boolean>} True if stock was restored, false otherwise
+   */
+  static async restoreVariantStock({ productId, variantId, quantity, session = null }) {
+    const options = session ? { session } : {};
+
+    const result = await Product.updateOne(
+      {
+        _id: productId,
+        variants: {
+          $elemMatch: {
+            _id: variantId
+          }
+        }
+      },
+      {
+        $inc: { "variants.$.stock": quantity }
+      },
+      options
     );
 
     return result.matchedCount > 0 && result.modifiedCount > 0;

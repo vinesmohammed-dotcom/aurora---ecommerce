@@ -19,6 +19,8 @@ describe("Phase 4 — Address Management & IDOR Security (Integration Tests)", (
       await mongoose.connect(process.env.MONGODB_URI || env.MONGODB_URI || "mongodb://127.0.0.1:27017/ecommerce_test_suite");
     }
 
+    await Address.syncIndexes();
+
     // Clean prior test artifacts
     await Address.deleteMany({});
     await User.deleteMany({ email: { $in: ["user.a@example.com", "user.b@example.com"] } });
@@ -207,6 +209,94 @@ describe("Phase 4 — Address Management & IDOR Security (Integration Tests)", (
       const res = await request(app).get("/api/v1/addresses");
       expect(res.status).toBe(401);
       expect(res.body.code).toBe("UNAUTHORIZED");
+    });
+  });
+
+  describe("Database Level Partial Index Verification (isDefault Unique Consistency)", () => {
+    let testUserId;
+
+    beforeAll(() => {
+      testUserId = new mongoose.Types.ObjectId();
+    });
+
+    it("1. User having no default address works (all isDefault: false)", async () => {
+      const addr1 = await Address.create({
+        userId: testUserId,
+        fullName: "Test Recipient 1",
+        phone: "+91 9999999991",
+        addressLine1: "Street 1",
+        city: "City",
+        state: "State",
+        postalCode: "123456",
+        isDefault: false
+      });
+      expect(addr1.isDefault).toBe(false);
+
+      const addr2 = await Address.create({
+        userId: testUserId,
+        fullName: "Test Recipient 2",
+        phone: "+91 9999999992",
+        addressLine1: "Street 2",
+        city: "City",
+        state: "State",
+        postalCode: "123456",
+        isDefault: false
+      });
+      expect(addr2.isDefault).toBe(false);
+    });
+
+    it("2. User having one default address works", async () => {
+      const defaultAddr = await Address.create({
+        userId: testUserId,
+        fullName: "Test Default Recipient",
+        phone: "+91 9999999993",
+        addressLine1: "Default Street",
+        city: "City",
+        state: "State",
+        postalCode: "123456",
+        isDefault: true
+      });
+      expect(defaultAddr.isDefault).toBe(true);
+    });
+
+    it("3. Attempting to insert a second default address for the same user fails with duplicate key error (E11000)", async () => {
+      let duplicateError;
+      try {
+        await Address.create({
+          userId: testUserId,
+          fullName: "Illegal Second Default",
+          phone: "+91 9999999994",
+          addressLine1: "Illegal Street",
+          city: "City",
+          state: "State",
+          postalCode: "123456",
+          isDefault: true
+        });
+      } catch (err) {
+        duplicateError = err;
+      }
+
+      expect(duplicateError).toBeDefined();
+      expect(duplicateError.code).toBe(11000);
+    });
+
+    it("4. User having multiple non-default addresses works seamlessly with one default address", async () => {
+      const addr3 = await Address.create({
+        userId: testUserId,
+        fullName: "Non-Default 3",
+        phone: "+91 9999999995",
+        addressLine1: "Street 3",
+        city: "City",
+        state: "State",
+        postalCode: "123456",
+        isDefault: false
+      });
+      expect(addr3.isDefault).toBe(false);
+
+      const nonDefaults = await Address.find({ userId: testUserId, isDefault: false });
+      expect(nonDefaults.length).toBe(3); // addr1, addr2, addr3
+      const defaults = await Address.find({ userId: testUserId, isDefault: true });
+      expect(defaults.length).toBe(1); // exactly 1 default
     });
   });
 });

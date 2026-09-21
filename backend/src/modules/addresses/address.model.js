@@ -5,8 +5,7 @@ const addressSchema = new mongoose.Schema(
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: [true, "User ID is required"],
-      index: true
+      required: [true, "User ID is required"]
     },
     fullName: {
       type: String,
@@ -80,7 +79,16 @@ const addressSchema = new mongoose.Schema(
 );
 
 // Compound index for querying user default addresses efficiently
-addressSchema.index({ userId: 1, isDefault: 1 });
+addressSchema.index({ userId: 1, isDefault: -1 });
+
+// Unique partial index: Guarantees at the database level that a user has at most ONE default address
+addressSchema.index(
+  { userId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { isDefault: true }
+  }
+);
 
 const Address = mongoose.models.Address || mongoose.model("Address", addressSchema);
 

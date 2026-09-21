@@ -329,3 +329,30 @@ Every concept below is explained with a **simple real-world analogy first**, fol
 - **Where it appears**: `backend/tests/auth.test.js`.
 - **Interview Question**: *"What is the advantage of using Supertest over making Axios requests against a running `localhost:5000` server during tests?"*
 - **Interview Answer**: *"Testing against a running port requires starting and stopping background server processes, risks port conflicts in CI/CD environments, and is slower due to OS socket allocation. Supertest operates in-process via Node streams, providing fast, deterministic, and isolated HTTP assertions."*
+
+---
+
+## Phase 5 Learning Concepts (Concepts 43 – 60)
+
+For full 6-part deep dives (*Real-World Analogy, Technical Explanation, Project Code Example, Interview Question, Interview Answer, Practice Exercise*) on Phase 5, refer to the master deliverable: [Phase 5 Master Report](file:///c:/Users/vines/react%20first%20project/docs/reports/phase-05-report.md).
+
+| # | Concept | Real-World Analogy | Technical Summary |
+|---|---------|--------------------|-------------------|
+| **43** | **Server-Authoritative Pricing** | The cashier scanning bar codes from the store database, ignoring custom stickers put on products by customers. | Frontend prices are untrusted; the server re-queries MongoDB catalog prices, recalculates offers, coupons, and delivery fees on every transaction. |
+| **44** | **Integer Minor Units (Paise) Arithmetic** | Counting pennies or paise directly rather than using decimal dollars/rupees to prevent fractional penny loss. | Storing currency in integer minor units (paise) avoids IEEE 754 floating-point arithmetic errors (`0.1 + 0.2 !== 0.3`). |
+| **45** | **Non-Stacking Promotional Offers** | "Only one promotional discount may be applied per item; the greatest discount applies." | Category and Product offers do not stack; a deterministic resolver picks the highest percentage discount. |
+| **46** | **Coupon Validation Engine** | Flyer vouchers with strict expiry, minimum spend, max discount cap, and per-customer limits. | Validates coupon code temporal dates, minimum order values (MOV), max discount caps, and usage quotas. |
+| **47** | **Historical Frozen Order Snapshots** | A printed store receipt recording the exact price, title, and address on the date of purchase. | Products and addresses change over time; order schemas embed deep frozen snapshots of product names, variant SKUs, prices, and shipping addresses. |
+| **48** | **Multi-Item Atomic Stock Reservation & Compensation Rollback** | Reserving multiple airline seats together; if any seat fails, all previously held seats are immediately released. | Atomically decrements variant stock sequentially; if any item has insufficient stock, a compensation rollback restores all previous decrements. |
+| **49** | **Client Idempotency Keys** | An elevator button that lights up on the first press; pressing it 5 more times does not call 5 elevators. | A unique UUID sent in request headers to guarantee that retried or double-clicked requests execute exactly once. |
+| **50** | **Order Lifecycle State Machine** | A package delivery tracker with strictly ordered statuses (`CONFIRMED` -> `PROCESSING` -> `SHIPPED` -> `DELIVERED`). | Enforces valid forward state transitions and rejects illegal transitions (e.g., cannot transition from `DELIVERED` to `CONFIRMED`). |
+| **51** | **MongoDB `$elemMatch` Array Querying** | Searching for a person who has *both* a valid driver's license AND is over 21, rather than matching someone with a license and someone else who is over 21. | Enforces that both `_id` and `stock >= quantity` match the *exact same* embedded variant subdocument. |
+| **52** | **Unique Partial Filter vs Sparse Indexes** | A VIP parking permit: only one car can park in the VIP space (`isDefault: true`), but unlimited cars can park in regular spaces. | Sparse indexes still index `isDefault: false`; partial filter indexes (`partialFilterExpression: { isDefault: true }`) correctly enforce single-default rules. |
+| **53** | **Idempotent Stock Restitution on Cancellation** | Returning a purchased item to the store shelf; returning it twice does not duplicate inventory on the shelf. | Cancelling an order checks current status; only active orders restore stock and transition to `CANCELLED`, preventing duplicate restorations. |
+| **54** | **Tiered Delivery Fee Logic** | "Free shipping on orders above ₹1,000, otherwise ₹99 delivery fee applies." | Dynamically evaluated during checkout based on net cart subtotal after promotional offer reductions. |
+| **55** | **Cash on Delivery (COD) Flow vs Gateways** | Paying the delivery courier at your doorstep upon receiving the parcel. | Immediate order placement without synchronous payment gateway webhooks; payment status transitions from `PENDING` to `COMPLETED` upon physical delivery. |
+| **56** | **Defense-in-Depth Concurrency Matrix** | Multi-layer bank vault: ID checks, security door, biometric scanner, and tamper alarms. | Concurrency protected by UI button debouncing, network idempotency keys, database atomic operations, and state machine guards. |
+| **57** | **Single Default Address Pattern** | One primary residence on file; updating a new default removes default flag from the previous address. | Managed via atomic transaction/bulkWrite and enforced at the database layer via partial filter unique indexes. |
+| **58** | **Zero Stacking Integration Tests** | Auditing financial records to ensure discounts never compounded illegally. | Integration tests verify that combining a 15% category offer and a 20% product offer resolves to exactly 20%, not 35%. |
+| **59** | **User Usage Tracking for Coupons** | A punch-card loyalty card where each hole punched tracks individual redemptions. | An array of `{ userId, count }` subdocuments on the coupon document tracks per-user redemption limits. |
+| **60** | **Client Double-Click / Race Condition Prevention** | Disabling the "Submit Payment" button immediately upon click with a loading spinner. | React states (`isSubmitting`) prevent rapid multiple submissions while the network request is inflight. |

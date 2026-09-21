@@ -87,15 +87,53 @@ Client prices are never accepted. Cart prices, discounts, and inventory availabi
 | Method | Endpoint | Purpose | Auth | Role | Request Body / Headers | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `POST` | `/verify-signature` | Verify Razorpay HMAC-SHA256 signature | Yes | User | `{ razorpay_order_id, razorpay_payment_id, razorpay_signature }` | 200, 400 |
-| `POST` | `/retry` | Generate fresh Razorpay order for failed order | Yes | User | `{ orderId }` | 200, 400 |
-| `POST` | `/webhook` | Asynchronous Razorpay webhook ingestion | No | Gateway | Headers: `x-razorpay-signature`, Body: Webhook payload | 200, 400 |
+| `POST` | `/retry` | (Phase 6) Generate fresh Razorpay order for failed order | Yes | User | `{ orderId }` | 200, 400 |
+| `POST` | `/webhook` | (Phase 6) Asynchronous Razorpay webhook ingestion | No | Gateway | Headers: `x-razorpay-signature`, Body: Webhook payload | 200, 400 |
 
-### 2.7 Wallet (`/api/v1/wallet`)
+### 2.7 Checkout Calculation Engine (`/api/v1/checkout`)
+| Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/summary` | Calculate authoritative checkout pricing, offers, coupons & delivery | Yes | User | `{ addressId?, couponCode? }` | 200, 400, 401, 422 |
+| `POST` | `/coupon` | Apply coupon code and recalculate checkout totals | Yes | User | `{ couponCode, addressId? }` | 200, 400, 401, 404, 422 |
+
+### 2.8 Promotional Offers (`/api/v1/offers` & `/api/v1/admin/offers`)
+| Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/offers` | List promotional offers | No | Public | Query: `targetType?, isActive?` | 200 |
+| `GET` | `/offers/:id` | Get offer details | No | Public | None | 200, 404 |
+| `GET` | `/admin/offers` | Admin list all promotional offers | Yes | Admin | None | 200, 401, 403 |
+| `POST` | `/admin/offers` | Create product or category percentage offer | Yes | Admin | `{ name, targetType, product?, category?, discountPercentage, startDate?, endDate, isActive? }` | 201, 400, 401, 403, 422 |
+| `PUT` | `/admin/offers/:id` | Update offer parameters | Yes | Admin | `{ name?, discountPercentage?, startDate?, endDate?, isActive? }` | 200, 400, 401, 403, 404, 422 |
+| `DELETE`| `/admin/offers/:id`| Remove promotional offer | Yes | Admin | None | 200, 401, 403, 404 |
+
+### 2.9 Promotional Coupons (`/api/v1/coupons` & `/api/v1/admin/coupons`)
+| Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/coupons/validate` | Validate coupon against current cart subtotal | Yes | User | `{ code }` | 200, 400, 401, 404, 422 |
+| `GET` | `/admin/coupons` | List all coupons with redemptions and caps | Yes | Admin | Query: `isActive?` | 200, 401, 403 |
+| `POST` | `/admin/coupons` | Create voucher coupon | Yes | Admin | `{ code, description?, discountType, discountValue, minOrderValue?, maxDiscount?, startDate?, expiryDate, usageLimit?, perUserLimit? }` | 201, 400, 401, 403, 409, 422 |
+| `GET` | `/admin/coupons/:id` | Get coupon details | Yes | Admin | None | 200, 401, 403, 404 |
+| `PUT` | `/admin/coupons/:id` | Update coupon details and limits | Yes | Admin | `{ description?, discountValue?, minOrderValue?, maxDiscount?, expiryDate?, usageLimit?, perUserLimit?, isActive? }` | 200, 400, 401, 403, 404, 422 |
+| `DELETE`| `/admin/coupons/:id`| Delete promotional coupon | Yes | Admin | None | 200, 401, 403, 404 |
+
+### 2.10 Orders & COD Ordering (`/api/v1/orders` & `/api/v1/admin/orders`)
+| Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/orders/checkout/cod` | Place Cash on Delivery order with stock deduction | Yes | User | `{ addressId, couponCode?, idempotencyKey? }` | 201, 400, 401, 404, 422 |
+| `GET` | `/orders` | List customer's personal order history | Yes | User | Query: `page?, limit?` | 200, 401 |
+| `GET` | `/orders/:id` | View order snapshot with anti-IDOR protection | Yes | User | None | 200, 401, 404 |
+| `POST` | `/orders/:id/cancel` | Cancel order before dispatch with inventory restoration | Yes | User | `{ reason? }` | 200, 400, 401, 404 |
+| `GET` | `/admin/orders` | Admin list all orders with filter and search | Yes | Admin | Query: `page?, limit?, status?, search?` | 200, 401, 403 |
+| `GET` | `/admin/orders/:id` | Admin inspect order snapshot | Yes | Admin | None | 200, 401, 403, 404 |
+| `PATCH` | `/admin/orders/:id/status`| Advance order lifecycle along state machine | Yes | Admin | `{ status, note? }` | 200, 400, 401, 403, 404, 422 |
+| `POST` | `/admin/orders/:id/cancel` | Admin cancel order with stock restoration | Yes | Admin | `{ reason? }` | 200, 400, 401, 403, 404 |
+
+### 2.11 Wallet (`/api/v1/wallet`)
 | Method | Endpoint | Purpose | Auth | Role | Query / Body | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/` | Get current balance and recent transactions | Yes | User | `page, limit` | 200 |
+| `GET` | `/` | (Phase 6) Get current balance and recent transactions | Yes | User | `page, limit` | 200 |
 
-### 2.8 Admin Catalog & Operations (`/api/v1/admin/products`, `/api/v1/categories`, `/api/v1/brands`)
+### 2.12 Admin Catalog & Operations (`/api/v1/admin/products`, `/api/v1/categories`, `/api/v1/brands`)
 | Method | Endpoint | Purpose | Auth | Role | Request Body / Query | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/admin/products/all` | List all products including drafts & costPrice | Yes | Admin | `page, limit, search, category, brand` | 200, 401, 403 |

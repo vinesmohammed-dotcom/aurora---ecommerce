@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import Button from "../../components/ui/Button";
 
 export default function CartSummary({ subtotal, totalItems, hasStaleItems, onClearCart, isClearing = false }) {
@@ -33,19 +34,16 @@ export default function CartSummary({ subtotal, totalItems, hasStaleItems, onCle
       )}
 
       <div className="pt-2 space-y-2">
-        <div className="relative group">
+        <Link to="/checkout" className="block w-full">
           <Button
             type="button"
             variant="primary"
-            className="w-full justify-center py-3 text-sm font-bold opacity-75 cursor-not-allowed"
-            disabled={true}
+            className="w-full justify-center py-3 text-sm font-bold shadow-md shadow-indigo-200"
+            disabled={hasStaleItems || totalItems === 0}
           >
             Proceed to Checkout
           </Button>
-          <p className="mt-1 text-center text-[11px] font-medium text-slate-400">
-            🔒 Checkout & Payments will be activated in Phase 5
-          </p>
-        </div>
+        </Link>
 
         {totalItems > 0 && (
           <button

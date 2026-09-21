@@ -27,6 +27,8 @@ describe("Phase 4 — Shopping Cart, Quantity Rules & Stale Detection (Integrati
       await mongoose.connect(process.env.MONGODB_URI || env.MONGODB_URI || "mongodb://127.0.0.1:27017/ecommerce_test_suite");
     }
 
+    await Cart.syncIndexes();
+
     // Clean prior test artifacts
     await Cart.deleteMany({});
     await Product.deleteMany({});
@@ -325,6 +327,23 @@ describe("Phase 4 — Shopping Cart, Quantity Rules & Stale Detection (Integrati
       const res = await request(app).get("/api/v1/cart");
       expect(res.status).toBe(401);
       expect(res.body.code).toBe("UNAUTHORIZED");
+    });
+  });
+
+  describe("Cart Uniqueness Safeguards (One Cart Per User)", () => {
+    it("CRITICAL: Database strictly prevents duplicate cart insertion for the same userId (E11000)", async () => {
+      const duplicateUserId = new mongoose.Types.ObjectId();
+      await Cart.create({ userId: duplicateUserId, items: [] });
+
+      let duplicateError;
+      try {
+        await Cart.create({ userId: duplicateUserId, items: [] });
+      } catch (err) {
+        duplicateError = err;
+      }
+
+      expect(duplicateError).toBeDefined();
+      expect(duplicateError.code).toBe(11000);
     });
   });
 });

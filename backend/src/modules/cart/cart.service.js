@@ -17,7 +17,15 @@ class CartService {
     let cart = await Cart.findOne({ userId });
 
     if (!cart) {
-      cart = await Cart.create({ userId, items: [] });
+      try {
+        cart = await Cart.create({ userId, items: [] });
+      } catch (err) {
+        if (err.code === 11000) {
+          cart = await Cart.findOne({ userId });
+        } else {
+          throw err;
+        }
+      }
     }
 
     const populatedItems = [];
@@ -155,7 +163,15 @@ class CartService {
     // 4. Find or create user cart
     let cart = await Cart.findOne({ userId });
     if (!cart) {
-      cart = new Cart({ userId, items: [] });
+      try {
+        cart = await Cart.create({ userId, items: [] });
+      } catch (err) {
+        if (err.code === 11000) {
+          cart = await Cart.findOne({ userId });
+        } else {
+          throw err;
+        }
+      }
     }
 
     // 5. Check if item already exists in cart

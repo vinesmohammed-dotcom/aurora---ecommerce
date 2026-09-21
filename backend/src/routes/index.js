@@ -8,6 +8,10 @@ const { publicProductRouter, adminProductRouter } = require("../modules/products
 const addressRoutes = require("../modules/addresses/address.routes");
 const cartRoutes = require("../modules/cart/cart.routes");
 const wishlistRoutes = require("../modules/wishlist/wishlist.routes");
+const { publicOfferRouter, adminOfferRouter } = require("../modules/offers/offer.routes");
+const { publicCouponRouter, adminCouponRouter } = require("../modules/coupons/coupon.routes");
+const checkoutRoutes = require("../modules/checkout/checkout.routes");
+const { customerOrderRouter, adminOrderRouter } = require("../modules/orders/order.routes");
 
 const apiRouter = Router();
 
@@ -30,9 +34,22 @@ apiRouter.use("/categories", publicCategoryRouter);
 apiRouter.use("/brands", publicBrandRouter);
 apiRouter.use("/products", publicProductRouter);
 
+// Promotional Offers & Coupons
+apiRouter.use("/offers", publicOfferRouter);
+apiRouter.use("/coupons", publicCouponRouter);
+
+// Checkout Calculation Engine
+apiRouter.use("/checkout", checkoutRoutes);
+
+// Order Placement & Lifecycle
+apiRouter.use("/orders", customerOrderRouter);
+
 // Admin Management Endpoints
 apiRouter.use("/admin/categories", adminCategoryRouter);
 apiRouter.use("/admin/brands", adminBrandRouter);
 apiRouter.use("/admin/products", adminProductRouter);
+apiRouter.use("/admin/offers", adminOfferRouter);
+apiRouter.use("/admin/coupons", adminCouponRouter);
+apiRouter.use("/admin/orders", adminOrderRouter);
 
 module.exports = apiRouter;

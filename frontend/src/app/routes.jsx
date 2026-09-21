@@ -11,9 +11,13 @@ import ProfilePage from "../pages/ProfilePage";
 import OrdersPage from "../pages/OrdersPage";
 import AdminDashboardPage from "../pages/AdminDashboardPage";
 import ProductDetailPage from "../pages/ProductDetailPage";
+import CheckoutPage from "../features/checkout/CheckoutPage";
 import AdminCategoriesPage from "../pages/admin/AdminCategoriesPage";
 import AdminBrandsPage from "../pages/admin/AdminBrandsPage";
 import AdminProductsPage from "../pages/admin/AdminProductsPage";
+import AdminOffersPage from "../pages/admin/AdminOffersPage";
+import AdminCouponsPage from "../pages/admin/AdminCouponsPage";
+import AdminOrdersPage from "../pages/admin/AdminOrdersPage";
 import NotFoundPage from "../pages/NotFoundPage";
 
 /**
@@ -33,11 +37,15 @@ export const router = createBrowserRouter([
       { path: "cart", element: <CartPage /> },
       { path: "wishlist", element: <WishlistPage /> },
       { path: "profile", element: <ProfilePage /> },
+      { path: "checkout", element: <CheckoutPage /> },
       { path: "orders", element: <OrdersPage /> },
       { path: "admin", element: <AdminDashboardPage /> },
       { path: "admin/categories", element: <AdminCategoriesPage /> },
       { path: "admin/brands", element: <AdminBrandsPage /> },
       { path: "admin/products", element: <AdminProductsPage /> },
+      { path: "admin/offers", element: <AdminOffersPage /> },
+      { path: "admin/coupons", element: <AdminCouponsPage /> },
+      { path: "admin/orders", element: <AdminOrdersPage /> },
       { path: "*", element: <NotFoundPage /> }
     ]
   }

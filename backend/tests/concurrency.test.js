@@ -6,23 +6,26 @@ import Category from "../src/modules/categories/category.model";
 import Brand from "../src/modules/brands/brand.model";
 import StockService from "../src/modules/products/stock.service";
 
-describe("Phase 4 — Stock Concurrency & Atomic Race Condition Safeguards", () => {
+describe("Phase 4 & 5 — Stock Concurrency & Atomic Race Condition Safeguards", () => {
   let testProductId;
   let limitedVariantId;
+  let multiVariantProductId;
+  let variantAId;
+  let variantBId;
 
   beforeAll(async () => {
     if (mongoose.connection.readyState === 0) {
       await mongoose.connect(process.env.MONGODB_URI || env.MONGODB_URI || "mongodb://127.0.0.1:27017/ecommerce_test_suite");
     }
 
-    await Product.deleteMany({ slug: "flash-sale-sneaker" });
+    await Product.deleteMany({ slug: { $in: ["flash-sale-sneaker", "multi-variant-shoe"] } });
     await Category.deleteMany({ slug: "flash-sale-category" });
     await Brand.deleteMany({ slug: "flash-sale-brand" });
 
     const cat = await Category.create({ name: "Flash Sale Category", slug: "flash-sale-category", isActive: true });
     const brand = await Brand.create({ name: "Flash Sale Brand", slug: "flash-sale-brand", isActive: true });
 
-    // Seed product with EXACTLY 1 item in stock
+    // 1. Seed product with EXACTLY 1 item in stock for race test
     const product = await Product.create({
       name: "Flash Sale Sneaker",
       slug: "flash-sale-sneaker",
@@ -43,10 +46,40 @@ describe("Phase 4 — Stock Concurrency & Atomic Race Condition Safeguards", () 
 
     testProductId = product._id;
     limitedVariantId = product.variants[0]._id;
+
+    // 2. Seed multi-variant product: Variant A has 0 stock, Variant B has 5 stock
+    const multiProd = await Product.create({
+      name: "Multi Variant Shoe",
+      slug: "multi-variant-shoe",
+      description: "Shoe with multiple variants to test $elemMatch condition isolation.",
+      category: cat._id,
+      brand: brand._id,
+      isActive: true,
+      variants: [
+        {
+          sku: "MULTI-VAR-A",
+          price: 12000,
+          costPrice: 8000,
+          stock: 0, // Out of stock
+          isActive: true
+        },
+        {
+          sku: "MULTI-VAR-B",
+          price: 12000,
+          costPrice: 8000,
+          stock: 5, // In stock
+          isActive: true
+        }
+      ]
+    });
+
+    multiVariantProductId = multiProd._id;
+    variantAId = multiProd.variants[0]._id;
+    variantBId = multiProd.variants[1]._id;
   });
 
   afterAll(async () => {
-    await Product.deleteMany({ slug: "flash-sale-sneaker" });
+    await Product.deleteMany({ slug: { $in: ["flash-sale-sneaker", "multi-variant-shoe"] } });
     await Category.deleteMany({ slug: "flash-sale-category" });
     await Brand.deleteMany({ slug: "flash-sale-brand" });
   });
@@ -94,5 +127,39 @@ describe("Phase 4 — Stock Concurrency & Atomic Race Condition Safeguards", () 
     const refreshedProduct = await Product.findById(testProductId);
     const variant = refreshedProduct.variants.id(limitedVariantId);
     expect(variant.stock).toBe(0);
+  });
+
+  it("CRITICAL $elemMatch ISOLATION: Sufficient stock in Variant B must NOT satisfy Variant A purchase when Variant A has 0 stock", async () => {
+    // Attempt to decrement Variant A (stock = 0) on a product where Variant B has stock = 5
+    const attemptA = await StockService.decrementVariantStock({
+      productId: multiVariantProductId,
+      variantId: variantAId,
+      quantity: 1
+    });
+
+    // Must strictly fail!
+    expect(attemptA).toBe(false);
+
+    // Verify neither variant had its stock corrupted
+    const refreshed = await Product.findById(multiVariantProductId);
+    const vA = refreshed.variants.id(variantAId);
+    const vB = refreshed.variants.id(variantBId);
+
+    expect(vA.stock).toBe(0);
+    expect(vB.stock).toBe(5); // Variant B remains untouched!
+  });
+
+  it("Atomic stock restoration: Restores exact variant stock when cancelled", async () => {
+    const restored = await StockService.restoreVariantStock({
+      productId: testProductId,
+      variantId: limitedVariantId,
+      quantity: 1
+    });
+
+    expect(restored).toBe(true);
+
+    const refreshedProduct = await Product.findById(testProductId);
+    const variant = refreshedProduct.variants.id(limitedVariantId);
+    expect(variant.stock).toBe(1);
   });
 });

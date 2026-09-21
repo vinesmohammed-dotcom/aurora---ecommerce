@@ -20,7 +20,15 @@ class WishlistService {
     });
 
     if (!wishlist) {
-      wishlist = await Wishlist.create({ userId, products: [] });
+      try {
+        wishlist = await Wishlist.create({ userId, products: [] });
+      } catch (err) {
+        if (err.code === 11000) {
+          wishlist = await Wishlist.findOne({ userId });
+        } else {
+          throw err;
+        }
+      }
     }
 
     // Format products safely and detect inactive items
@@ -61,7 +69,15 @@ class WishlistService {
 
     let wishlist = await Wishlist.findOne({ userId });
     if (!wishlist) {
-      wishlist = await Wishlist.create({ userId, products: [] });
+      try {
+        wishlist = await Wishlist.create({ userId, products: [] });
+      } catch (err) {
+        if (err.code === 11000) {
+          wishlist = await Wishlist.findOne({ userId });
+        } else {
+          throw err;
+        }
+      }
     }
 
     await Wishlist.updateOne(

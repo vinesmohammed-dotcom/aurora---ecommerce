@@ -20,6 +20,8 @@ describe("Phase 4 — Customer Wishlist & Set Uniqueness (Integration Tests)", (
       await mongoose.connect(process.env.MONGODB_URI || env.MONGODB_URI || "mongodb://127.0.0.1:27017/ecommerce_test_suite");
     }
 
+    await Wishlist.syncIndexes();
+
     // Clean prior test artifacts
     await Wishlist.deleteMany({});
     await Product.deleteMany({});
@@ -156,6 +158,23 @@ describe("Phase 4 — Customer Wishlist & Set Uniqueness (Integration Tests)", (
       const res = await request(app).get("/api/v1/wishlist");
       expect(res.status).toBe(401);
       expect(res.body.code).toBe("UNAUTHORIZED");
+    });
+  });
+
+  describe("Wishlist Uniqueness Safeguards (One Wishlist Per User)", () => {
+    it("CRITICAL: Database strictly prevents duplicate wishlist insertion for the same userId (E11000)", async () => {
+      const duplicateUserId = new mongoose.Types.ObjectId();
+      await Wishlist.create({ userId: duplicateUserId, products: [] });
+
+      let duplicateError;
+      try {
+        await Wishlist.create({ userId: duplicateUserId, products: [] });
+      } catch (err) {
+        duplicateError = err;
+      }
+
+      expect(duplicateError).toBeDefined();
+      expect(duplicateError.code).toBe(11000);
     });
   });
 });

@@ -130,6 +130,57 @@ export default function AdminDashboardPage() {
               </Button>
             </Link>
           </Card>
+
+          <Card className="p-6 flex flex-col justify-between hover:shadow-md transition-shadow border border-slate-200">
+            <div>
+              <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg mb-4">
+                📦
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">Customer Orders</h3>
+              <p className="text-sm text-slate-500 mb-4">
+                Fulfill orders, advance state machine transitions, and monitor deliveries and cancellations.
+              </p>
+            </div>
+            <Link to="/admin/orders">
+              <Button variant="primary" size="sm" className="w-full">
+                Manage Orders &rarr;
+              </Button>
+            </Link>
+          </Card>
+
+          <Card className="p-6 flex flex-col justify-between hover:shadow-md transition-shadow border border-slate-200">
+            <div>
+              <div className="w-10 h-10 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-lg mb-4">
+                ⚡
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">Promotional Offers</h3>
+              <p className="text-sm text-slate-500 mb-4">
+                Configure product and category discount campaigns with deterministic non-stacking priority.
+              </p>
+            </div>
+            <Link to="/admin/offers">
+              <Button variant="secondary" size="sm" className="w-full">
+                Manage Offers &rarr;
+              </Button>
+            </Link>
+          </Card>
+
+          <Card className="p-6 flex flex-col justify-between hover:shadow-md transition-shadow border border-slate-200">
+            <div>
+              <div className="w-10 h-10 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center font-bold text-lg mb-4">
+                🎟️
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">Vouchers & Coupons</h3>
+              <p className="text-sm text-slate-500 mb-4">
+                Create promotional coupon codes, configure minimum order thresholds, and set usage caps.
+              </p>
+            </div>
+            <Link to="/admin/coupons">
+              <Button variant="secondary" size="sm" className="w-full">
+                Manage Coupons &rarr;
+              </Button>
+            </Link>
+          </Card>
         </div>
       </div>
     </div>

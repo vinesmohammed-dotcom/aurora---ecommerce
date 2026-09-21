@@ -159,6 +159,48 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 - **Simpler alternative**: Checking user ownership in memory after finding the document.
 - **Why alternative rejected**: In-memory checks require fetching unauthorized documents into Node memory, risk information leakage, and can expose existence oracles.
 
+### ADR-22: Mandatory $elemMatch in Embedded Variant Stock Atomic Operations
+- **Why we need it**: Absolute guarantees that variant ID and stock availability belong to the exact same embedded array element.
+- **Problem it solves**: Separated predicates evaluate independently across array elements in MongoDB. If Variant A has 0 stock and Variant B has 5 stock, separated queries match and update Variant A, causing negative stock and inventory corruption.
+- **Why appropriate**: `{ variants: { $elemMatch: { _id: variantId, stock: { $gte: quantity }, isActive: true } } }` forces joint evaluation on the exact same array element.
+- **Simpler alternative**: Separate top-level query predicates.
+- **Why alternative rejected**: Disastrous concurrency bugs and inventory cross-contamination.
+
+### ADR-23: Partial Filter Index for At-Most-One Default Address Guarantee
+- **Why we need it**: Database-level guarantee that a user has at most one default address, while allowing unlimited non-default addresses.
+- **Problem it solves**: Application-level checks can experience race conditions under concurrent writes.
+- **Why appropriate**: Unique partial index `{ userId: 1 }, { unique: true, partialFilterExpression: { isDefault: true } }` only indexes documents where `isDefault === true`.
+- **Simpler alternative**: Unique sparse index on `isDefault`.
+- **Why alternative rejected**: In Mongoose, `isDefault` is a Boolean (`false` or `true`). Sparse indexes still index `false`, preventing users from creating multiple non-default addresses.
+
+### ADR-24: Integer Minor Units (Paise) in Checkout Currency Calculations
+- **Why we need it**: Elimination of IEEE-754 floating point precision errors in currency arithmetic.
+- **Problem it solves**: Floating point representation causes errors such as `0.1 + 0.2 = 0.30000000000000004`, resulting in off-by-one paisa billing discrepancies.
+- **Why appropriate**: Converting rupees to integer paise (`Math.round(rupees * 100)`), executing all arithmetic in integers, and formatting to 2 decimals guarantees mathematical precision.
+- **Simpler alternative**: Standard JavaScript floating point math.
+- **Why alternative rejected**: Incurable rounding drifts across taxes, discounts, and order subtotals.
+
+### ADR-25: Deterministic Non-Stacking Promotional Offers (Larger Discount Wins)
+- **Why we need it**: Predictable, transparent discount resolution when multiple promotional campaigns target the same item.
+- **Problem it solves**: Unintended discount compounding where a 20% category offer and a 25% product offer compound to 40% or 45%, destroying retail margins.
+- **Why appropriate**: Non-stacking deterministic priority: if both category and product offers apply, the offer with the higher discount percentage strictly wins.
+- **Simpler alternative**: Stacking all active discounts.
+- **Why alternative rejected**: Destroys profitability and causes discount abuse.
+
+### ADR-26: Double-Click Prevention via Client Idempotency Keys and Unique Partial Index
+- **Why we need it**: Protection against impatient double-clicks, network retry storms, or double order submissions.
+- **Problem it solves**: Duplicate orders created for the same purchase, double-decrementing warehouse stock.
+- **Why appropriate**: Client generates an `idempotencyKey` per checkout session. Order service checks for existing order; MongoDB enforces uniqueness via `{ idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } }`.
+- **Simpler alternative**: Frontend-only button disabling.
+- **Why alternative rejected**: Client-side disabling fails against rapid network retries, script submissions, or slow connections.
+
+### ADR-27: Multi-Item Atomic Stock Decrement with Compensation Rollback
+- **Why we need it**: All-or-nothing stock reservation across multi-item orders in both standalone and replica set MongoDB instances.
+- **Problem it solves**: Partial order placement where items 1 and 2 are decremented, but item 3 is out of stock, leaving inventory trapped in limbo.
+- **Why appropriate**: Tracks decremented items; if any item fails stock verification, an immediate compensating loop restores all previously decremented items before aborting the order.
+- **Simpler alternative**: Reserving stock without rollback or requiring replica set transactions.
+- **Why alternative rejected**: Traps inventory in un-purchased state on standalone instances or failures.
+
 ---
 
 ## 3. Verified Dependency Versions Audit
