@@ -35,10 +35,15 @@ All API endpoints follow strict REST conventions and are versioned under `/api/v
 ### 2.3 Catalog Browsing (`/api/v1/products`, `/api/v1/categories`, `/api/v1/brands`)
 | Method | Endpoint | Purpose | Auth | Role | Query Params | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/products` | List active products with filters & pagination | No | Public | `page, limit, category, brand, minPrice, maxPrice, sort, search` | 200 |
-| `GET` | `/products/:slug` | Get full product detail with variants | No | Public | None | 200, 404 |
-| `GET` | `/categories` | List all active categories | No | Public | None | 200 |
-| `GET` | `/brands` | List all active brands | No | Public | None | 200 |
+| `GET` | `/products` | List active products with filters, sorting, and pagination (excludes `costPrice`) | No | Public | `page, limit, category, brand, minPrice, maxPrice, sort, search, inStock` | 200, 400 |
+| `GET` | `/products/:slug` | Get product detail by unique slug with active variants (excludes `costPrice`) | No | Public | None | 200, 404 |
+| `GET` | `/categories` | List active categories (or paginated with search) | No | Public | `page, limit, search` | 200 |
+| `GET` | `/categories/:slug` | Get single category by slug | No | Public | None | 200, 404 |
+| `GET` | `/brands` | List active brands (or paginated with search) | No | Public | `page, limit, search` | 200 |
+| `GET` | `/brands/:slug` | Get single brand by slug | No | Public | None | 200, 404 |
+
+> [!IMPORTANT]
+> **Data Protection Rule**: Public catalog endpoints strictly project away `variants.costPrice` via `.select('-variants.costPrice')`. Wholesale margins are never exposed to storefront visitors.
 
 ### 2.4 Cart & Wishlist (`/api/v1/cart`, `/api/v1/wishlist`)
 | Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
@@ -73,18 +78,24 @@ All API endpoints follow strict REST conventions and are versioned under `/api/v
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/` | Get current balance and recent transactions | Yes | User | `page, limit` | 200 |
 
-### 2.8 Admin Management (`/api/v1/admin`)
-| Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
+### 2.8 Admin Catalog & Operations (`/api/v1/admin/products`, `/api/v1/categories`, `/api/v1/brands`)
+| Method | Endpoint | Purpose | Auth | Role | Request Body / Query | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/dashboard` | Metrics: Total revenue, orders, low stock | Yes | Admin | None | 200, 403 |
-| `POST` | `/products` | Create product with variants & upload images | Yes | Admin | Multipart form data | 201, 400 |
-| `PATCH` | `/products/:id` | Update product attributes, status, prices | Yes | Admin | Partial product data | 200, 400 |
-| `PATCH` | `/products/:id/variants/:varId/stock` | Adjust warehouse inventory | Yes | Admin | `{ stockAdjustment }` | 200, 400 |
-| `GET` | `/orders` | List all platform orders with status filters | Yes | Admin | `status, page, limit` | 200 |
-| `PATCH` | `/orders/:id/status` | Update lifecycle state (`SHIPPED`, etc.) | Yes | Admin | `{ status, trackingNumber }` | 200, 400 |
-| `PATCH` | `/orders/:id/return-review`| Approve or reject customer return request | Yes | Admin | `{ status: 'APPROVED' \| 'REJECTED', reason }` | 200, 400 |
-| `POST` | `/coupons` | Create promotional coupon code | Yes | Admin | Coupon schema body | 201, 400 |
-| `GET` | `/reports/sales` | Generate sales report with date filter | Yes | Admin | `startDate, endDate, format: 'json' \| 'csv' \| 'pdf'` | 200 |
+| `GET` | `/admin/products/all` | List all products including drafts & costPrice | Yes | Admin | `page, limit, search, category, brand` | 200, 401, 403 |
+| `POST` | `/admin/products` | Create product with embedded variants | Yes | Admin | `{ name, description, category, brand, variants: [{ sku, price, costPrice, stock, ... }] }` | 201, 400, 401, 403, 409, 422 |
+| `GET` | `/admin/products/:id` | Get full product detail including wholesale costPrice | Yes | Admin | None | 200, 401, 403, 404 |
+| `PUT` | `/admin/products/:id` | Update product metadata, category, brand, active status | Yes | Admin | `{ name?, description?, category?, brand?, isActive?, tags?, images? }` | 200, 400, 401, 403, 404, 422 |
+| `DELETE` | `/admin/products/:id` | Soft/hard delete product from catalog | Yes | Admin | None | 200, 401, 403, 404 |
+| `POST` | `/admin/products/:id/variants` | Add new embedded variant to product | Yes | Admin | `{ sku, title, price, costPrice, stock, attributes? }` | 201, 400, 401, 403, 404, 409, 422 |
+| `PATCH`/`PUT` | `/admin/products/:id/variants/:variantId` | Update embedded variant & recalculate basePrice | Yes | Admin | `{ title?, price?, costPrice?, stock?, isActive?, attributes? }` | 200, 400, 401, 403, 404, 422 |
+| `DELETE` | `/admin/products/:id/variants/:variantId` | Remove variant from product | Yes | Admin | None | 200, 400, 401, 403, 404 |
+| `POST` | `/categories` | Create category | Yes | Admin | `{ name, description?, isActive? }` | 201, 400, 401, 403, 409, 422 |
+| `PUT` | `/categories/:id` | Update category name, description, active status | Yes | Admin | `{ name?, description?, isActive? }` | 200, 400, 401, 403, 404, 422 |
+| `DELETE` | `/categories/:id` | Delete category | Yes | Admin | None | 200, 401, 403, 404 |
+| `POST` | `/brands` | Create brand | Yes | Admin | `{ name, description?, logo?, website?, isActive? }` | 201, 400, 401, 403, 409, 422 |
+| `PUT` | `/brands/:id` | Update brand details | Yes | Admin | `{ name?, description?, logo?, website?, isActive? }` | 200, 400, 401, 403, 404, 422 |
+| `DELETE` | `/brands/:id` | Delete brand | Yes | Admin | None | 200, 401, 403, 404 |
+| `GET` | `/admin/dashboard` | Future Metrics: Total revenue, orders, inventory counts | Yes | Admin | None | 200, 403 |
 
 ---
 

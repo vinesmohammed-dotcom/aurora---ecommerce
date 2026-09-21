@@ -46,71 +46,80 @@ In MongoDB, a foundational design decision is choosing between **referencing** (
 - **Fields**:
   - `_id`: `ObjectId`, required.
   - `email`: `String`, required, lowercase, trimmed.
-  - `hashedOtp`: `String`, required (SHA-256 digest of the 6-digit code; plaintext is never stored).
+  - `hashedOtp`: `String`, required (Server-secret keyed HMAC-SHA256 digest of `OTP:purpose:email`; plaintext is never stored and offline dictionary/rainbow table attacks against 6-digit codes are rendered computationally infeasible without the server secret).
   - `purpose`: `String`, required, enum: `['REGISTRATION', 'PASSWORD_RESET', 'EMAIL_CHANGE']`.
   - `expiresAt`: `Date`, required, 5-minute TTL from creation.
   - `attempts`: `Number`, default: `0` (tracks failed verification attempts).
   - `maxAttempts`: `Number`, default: `5` (locks token after 5 failed guesses).
   - `isUsed`: `Boolean`, default: `false` (prevents replay/reuse attacks).
   - `createdAt`, `updatedAt`: `Date`, timestamps.
+- **Methods**:
+  - `hashOtp(plainOtp, { purpose, email })`: Generates `crypto.createHmac("sha256", env.OTP_SECRET).update(`${plainOtp}:${purpose}:${email}`).digest("hex")`.
+  - `verifyOtp(candidateOtp)`: Performs timing-safe comparison `crypto.timingSafeEqual(...)` against candidate digest.
 - **Indexes**:
   - TTL Index: `{ expiresAt: 1 }, { expireAfterSeconds: 0 }` (MongoDB auto-deletes expired records).
   - Compound Index: `{ email: 1, purpose: 1 }` (accelerates looking up active verification tokens).
 
-### 2.3 Category Collection
+### 2.3 Category Collection (`backend/src/modules/categories/category.model.js`)
 - **Purpose**: High-level classification of catalog products (e.g. Footwear, Apparel, Electronics).
 - **Fields**:
   - `_id`: `ObjectId`, required.
   - `name`: `String`, required, unique, trimmed, min 2, max 50 chars.
-  - `slug`: `String`, required, unique, lowercase (URL-friendly string).
-  - `description`: `String`, optional.
+  - `slug`: `String`, required, unique, lowercase (URL-friendly slug).
+  - `description`: `String`, optional, max 500 chars.
   - `image`: `String`, optional (AWS S3 URL).
-  - `isActive`: `Boolean`, default: `true` (disabling a category hides its products from the store).
-  - `createdAt`, `updatedAt`: `Date`.
+  - `isActive`: `Boolean`, default: `true` (disabling a category hides its products from public shop queries).
+  - `createdAt`, `updatedAt`: `Date`, timestamps.
 - **Indexes**:
   - Unique index: `{ slug: 1 }`
   - Index: `{ isActive: 1 }`
 
-### 2.4 Brand Collection
+### 2.4 Brand Collection (`backend/src/modules/brands/brand.model.js`)
 - **Purpose**: Manufacturer or brand classification (e.g. Nike, Adidas, Puma).
 - **Fields**:
   - `_id`: `ObjectId`, required.
-  - `name`: `String`, required, unique, trimmed.
+  - `name`: `String`, required, unique, trimmed, min 2, max 50 chars.
   - `slug`: `String`, required, unique, lowercase.
   - `logo`: `String`, optional (AWS S3 URL).
+  - `website`: `String`, optional.
+  - `description`: `String`, optional, max 500 chars.
   - `isActive`: `Boolean`, default: `true`.
-  - `createdAt`, `updatedAt`: `Date`.
+  - `createdAt`, `updatedAt`: `Date`, timestamps.
 - **Indexes**:
   - Unique index: `{ slug: 1 }`
+  - Index: `{ isActive: 1 }`
 
-### 2.5 Product Collection (with Embedded Variants)
-- **Purpose**: Complete catalog product definition, media assets, and variant stock matrices.
+### 2.5 Product Collection (with Embedded Variants) (`backend/src/modules/products/product.model.js`)
+- **Purpose**: Complete catalog product definition, media assets, and embedded variant stock matrices.
 - **Fields**:
   - `_id`: `ObjectId`, required.
-  - `name`: `String`, required, trimmed, min 3, max 120 chars.
-  - `slug`: `String`, required, unique, lowercase.
-  - `description`: `String`, required, min 10 chars.
-  - `category`: `ObjectId`, ref: `'Category'`, required.
-  - `brand`: `ObjectId`, ref: `'Brand'`, required.
+  - `title`: `String`, required, trimmed, min 3, max 120 chars (with virtual `name` getter/setter for dual compatibility).
+  - `slug`: `String`, required, unique, lowercase, trimmed.
+  - `description`: `String`, required, min 10 chars, max 2000 chars.
+  - `category`: `ObjectId`, ref: `'Category'`, required, indexed.
+  - `brand`: `ObjectId`, ref: `'Brand'`, required, indexed.
   - `images`: `[String]`, array of AWS S3 image URLs (min 1, max 6).
-  - `basePrice`: `Number`, required, min 0 (reference starting price).
-  - `isActive`: `Boolean`, default: `true`.
+  - `tags`: `[String]`, array of lowercase search tags.
+  - `basePrice`: `Number`, required, min 0 (automatically computed from lowest active variant price).
+  - `isActive`: `Boolean`, default: `true`, indexed.
   - `isFeatured`: `Boolean`, default: `false`.
-  - `variants`: Array of Subdocuments:
+  - `variants`: Array of Subdocuments (`variantSchema`, min 1 required):
     - `_id`: `ObjectId`, required (Variant ID).
-    - `sku`: `String`, required, uppercase, trimmed (Unique SKU code, e.g. `NK-AIR-BLK-09`).
-    - `attributes`: `Map` of strings, e.g. `{ color: "Black", size: "9" }`.
-    - `price`: `Number`, required, min 0 (Selling price).
-    - `costPrice`: `Number`, required, min 0 (Wholesale cost for admin profit calculations).
-    - `stock`: `Number`, required, min 0 (Available inventory).
-    - `images`: `[String]`, optional variant-specific images.
+    - `sku`: `String`, required, unique across platform (sparse unique index), uppercase.
+    - `title`: `String`, required, trimmed (e.g. "Size 10 - Navy Blue").
+    - `attributes`: `Map of String` (e.g. `color: "Navy", size: "10"`).
+    - `price`: `Number`, required, min 1 (customer retail selling price).
+    - `costPrice`: `Number`, required, min 0 (merchant wholesale cost price; **strictly excluded from customer endpoints via `select('-variants.costPrice')`**).
+    - `stock`: `Number`, required, min 0, integer (warehouse physical inventory).
     - `isActive`: `Boolean`, default: `true`.
-  - `createdAt`, `updatedAt`: `Date`.
+  - `createdAt`, `updatedAt`: `Date`, timestamps.
 - **Indexes**:
-  - Unique index: `{ slug: 1 }`
-  - Unique sparse index: `{ "variants.sku": 1 }`
-  - Compound Filter Index: `{ category: 1, isActive: 1, basePrice: 1 }`
-  - Text Index for Search: `{ name: "text", description: "text" }`
+  - Compound Index (ESR): `{ isActive: 1, basePrice: 1, createdAt: -1 }`
+  - Compound Index (Category ESR): `{ category: 1, isActive: 1, basePrice: 1 }`
+  - Compound Index (Brand ESR): `{ brand: 1, isActive: 1, basePrice: 1 }`
+  - Unique Sparse Index: `{ "variants.sku": 1 }, { unique: true, sparse: true }`
+  - Text Index: `{ title: "text", description: "text", tags: "text" }`
+- **Data Protection Guarantee**: Public endpoints (`GET /api/v1/products` and `GET /api/v1/products/:slug`) strictly project away `costPrice` using `.select('-variants.costPrice')`. Admin endpoints (`GET /api/v1/admin/products/:id`) provide full margin transparency to authorized administrators.
 
 ### 2.6 Cart Collection
 - **Purpose**: Persistent shopping cart for authenticated users.

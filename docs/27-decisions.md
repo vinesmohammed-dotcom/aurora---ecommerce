@@ -96,12 +96,12 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 - **Simpler alternative**: Native `crypto.pbkdf2` or `bcrypt` (C++ bindings).
 - **Why alternative rejected**: Native `bcrypt` requires node-gyp and native build tools on developer machines which frequently break across OS platforms. `bcryptjs` guarantees frictionless cross-platform portability.
 
-### ADR-13: SHA-256 Hashed OTPs with MongoDB TTL Index
+### ADR-13: Server-Secret Keyed HMAC-SHA256 Hashed OTPs with MongoDB TTL Index
 - **Why we need it**: Ephemeral verification tokens for user registration, password resets, and email changes.
-- **Problem it solves**: Plaintext OTPs stored in the database allow database administrators or compromised read replicas to read live verification tokens. Leaving expired OTPs in the database causes unbounded growth.
-- **Why appropriate**: Fast SHA-256 one-way hashing hides OTP values at rest. Comparing OTPs with `crypto.timingSafeEqual` prevents side-channel timing attacks. A MongoDB TTL index (`{ expiresAt: 1 }, { expireAfterSeconds: 0 }`) guarantees that the database engine automatically purges expired tokens without requiring external cron daemons.
-- **Simpler alternative**: Plaintext OTP in the `users` document with an `otpExpires` timestamp.
-- **Why alternative rejected**: Plaintext storage in the user document creates security leakage risks, pollutes the primary user schema, and requires manual database query filters to exclude expired tokens.
+- **Problem it solves**: 6-digit numeric OTPs possess an entropy space of only $10^6$ (1,000,000 values). A standard unkeyed hash (e.g. SHA-256) can be cracked in less than a second using a precomputed lookup table if the database is breached. Leaving expired OTPs causes unbounded storage growth.
+- **Why appropriate**: Server-secret keyed `crypto.createHmac("sha256", env.OTP_SECRET).update(`${otp}:${purpose}:${email}`).digest("hex")` cryptographically binds the token to both the recipient and intention, making offline precomputation impossible without the server secret. Verification uses `crypto.timingSafeEqual` to eliminate timing side-channels. A MongoDB TTL index (`{ expiresAt: 1 }, { expireAfterSeconds: 0 }`) guarantees that the database engine automatically purges expired tokens every 60 seconds without background cron daemons.
+- **Simpler alternative**: Plaintext OTP in the `users` document or plain unsalted SHA-256.
+- **Why alternative rejected**: Plaintext storage creates severe credential leakage risks; plain SHA-256 is vulnerable to offline rainbow table brute-force on 6-digit codes.
 
 ### ADR-14: Repository Layer Usage Boundary
 - **Why we need it**: Clear separation of persistence logic while avoiding redundant, anemic abstraction layers.
@@ -109,6 +109,27 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 - **Why appropriate**: We establish a strict architectural boundary: controllers delegate to services. Services interact with Mongoose models directly for standard CRUD operations. Separate repository modules are introduced **only** when complex query encapsulation, multi-collection aggregation pipelines, or data-source swapping is genuinely required.
 - **Simpler alternative**: Creating strict Repository wrappers for every single Mongoose model.
 - **Why alternative rejected**: Violates the "Do not over-engineer" principle. Mongoose `Model` is already an Active Record / Repository pattern implementation. Adding pure pass-through wrappers introduces maintenance overhead with zero operational benefit.
+
+### ADR-15: Embedded Variants Array within Product Document
+- **Why we need it**: High-performance catalog queries and atomic inventory management.
+- **Problem it solves**: A separate relational `variants` collection requires expensive `$lookup` (JOIN) stages on every storefront catalog and product detail query, increasing database latency.
+- **Why appropriate**: Products and their physical variants (sizes, colors, SKUs) are read together 99% of the time. Embedding variants in `Product.variants: [variantSchema]` provides zero-JOIN single-query reads and enables atomic inventory decrements (`$inc: { "variants.$.stock": -qty }`) using MongoDB's document-level ACID guarantees.
+- **Simpler alternative**: Normalizing variants into a separate MongoDB collection with `productId` references.
+- **Why alternative rejected**: Requires multi-stage aggregations and multi-document ACID transactions across collections for routine stock decrements, introducing unnecessary locking overhead.
+
+### ADR-16: Wholesale Cost Price Concealment via Projection
+- **Why we need it**: Wholesale margin confidentiality.
+- **Problem it solves**: Accidental leakage of wholesale supplier costs (`costPrice`) to storefront visitors, competitors, or crawlers.
+- **Why appropriate**: Strict field projection at the database layer using `.select('-variants.costPrice')` in all public catalog service queries (`getPublicProducts` and `getPublicProductBySlug`). The controller and service guarantee that public endpoints never transmit margin information over the wire, while administrative endpoints (`/admin/products/all` and `/admin/products/:id`) retain full margin metrics for authorized business personnel.
+- **Simpler alternative**: Stripping `costPrice` in frontend React UI code.
+- **Why alternative rejected**: Filtering on the frontend is a critical security vulnerability: inspecting the browser Network tab immediately exposes the wholesale margins sent in the JSON HTTP response.
+
+### ADR-17: Test Parallelism Isolation for Single-Instance MongoDB
+- **Why we need it**: Deterministic, flake-free automated integration testing.
+- **Problem it solves**: By default, Vitest executes test files concurrently. When integration tests run against a single shared MongoDB database, teardown hooks (`afterAll(() => Category.deleteMany({}))`) in one test suite delete documents that are actively being queried by another concurrent test suite, causing spurious race conditions.
+- **Why appropriate**: Configuring `fileParallelism: false` in `vitest.config.js` ensures test suites run sequentially, guaranteeing full database consistency across category, brand, product, and authentication test runs without requiring multi-tenant container orchestration.
+- **Simpler alternative**: Randomizing database names per test worker.
+- **Why alternative rejected**: Spawning multiple isolated databases on local development machines increases RAM consumption and startup latency for minimal gain.
 
 ---
 
@@ -118,12 +139,13 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 | :--- | :--- | :--- |
 | `express` | `^5.2.1` | Express 5 stable line with native async rejection handling. |
 | `morgan` | `^1.12.1` | HTTP access logging. |
-| `bcryptjs` | `^3.0.3` | Pure JS bcrypt password hashing with 12 salt rounds. |
+| `bcryptjs` | `^3.0.3` | Pure JS bcrypt password hashing with 12 salt rounds (adaptive cost, non memory-hard). |
 | `mongoose` | `^8.9.5` | Mongoose 8 schema modeling and MongoDB driver. |
 | `express-session` | `^1.18.1` | Stateful session management. |
 | `connect-mongo` | `^5.1.0` | MongoDB session store adapter. |
 | `zod` | `^3.24.1` | Type-safe runtime schema validation. |
 | `vitest` | `^3.2.7` | High performance unit/integration test runner. |
 | `supertest` | `^7.0.0` | In-memory HTTP endpoint testing. |
-| `react` | `^18.3.1` | Stable React 18 production release. |
-| `vite` | `^6.0.7` | Vite 6 build toolchain. |
+| `react` | `^19.3.0` | Upgraded to current React 19 stable line. |
+| `react-dom` | `^19.3.0` | React 19 DOM renderer. |
+| `vite` | `^6.4.3` | Vite 6 modern build toolchain. |

@@ -42,8 +42,11 @@ class AuthService {
       { $set: { isUsed: true } }
     );
 
-    // Generate secure 6-digit OTP
-    const { plainOtp, hashedOtp } = OTP.generateOtp();
+    // Generate secure 6-digit OTP using server-secret keyed HMAC
+    const { plainOtp, hashedOtp } = OTP.generateOtp({
+      purpose: OTP_PURPOSES.REGISTRATION,
+      email
+    });
 
     await OTP.create({
       email,
@@ -108,8 +111,11 @@ class AuthService {
     // Increment attempt counter
     otpDoc.attempts += 1;
 
-    // Constant-time hash verification
-    const isValid = OTP.verifyHash(otp, otpDoc.hashedOtp);
+    // Constant-time hash verification using server-secret keyed HMAC
+    const isValid = OTP.verifyHash(otp, otpDoc.hashedOtp, {
+      purpose: otpDoc.purpose,
+      email: otpDoc.email
+    });
 
     if (!isValid) {
       await otpDoc.save();
@@ -198,7 +204,10 @@ class AuthService {
         { $set: { isUsed: true } }
       );
 
-      const { plainOtp, hashedOtp } = OTP.generateOtp();
+      const { plainOtp, hashedOtp } = OTP.generateOtp({
+        purpose: OTP_PURPOSES.PASSWORD_RESET,
+        email
+      });
 
       await OTP.create({
         email,
@@ -295,7 +304,10 @@ class AuthService {
       { $set: { isUsed: true } }
     );
 
-    const { plainOtp, hashedOtp } = OTP.generateOtp();
+    const { plainOtp, hashedOtp } = OTP.generateOtp({
+      purpose: OTP_PURPOSES.EMAIL_CHANGE,
+      email: newEmail
+    });
 
     await OTP.create({
       email: newEmail,

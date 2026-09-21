@@ -61,3 +61,31 @@ This project is engineered specifically to serve as a centerpiece portfolio demo
   - **Zero Client Trust**: The frontend sends only intent (selected variant IDs and quantities). The server re-queries the database for prices, recalculates active offers, re-evaluates coupon eligibility rules, and enforces minimum order values at the exact moment of order creation.
   - The payment gateway order is generated entirely server-side with the recomputed total.
 - **Where demonstrated**: [14-cart-and-checkout.md](file:///c:/Users/vines/react%20first%20project/docs/14-cart-and-checkout.md).
+
+---
+
+### 2.6 Password Hashing Architecture: Adaptive Cost vs Fast Algorithms
+- **What the interviewer will ask**: *"Why did you choose bcrypt with cost factor 12 rather than SHA-256 or MD5 for user passwords?"*
+- **What you must understand**:
+  - **Adaptive Computational Cost**: Bcrypt is an adaptive password-hashing algorithm with a configurable computational cost, designed to make password-guessing attacks expensive. The work factor (salt rounds) can be increased over time as CPUs become faster.
+  - **Defeating Fast Hardware**: SHA-256 is designed for fast checksums. On modern GPUs, an attacker can test billions of SHA-256 hashes per second. Bcrypt cost factor 12 forces 4,096 iterations (~250ms per check), making brute-force attacks computationally and financially impossible.
+- **Where demonstrated**: `backend/src/modules/users/user.model.js` and [18-security.md](file:///c:/Users/vines/react%20first%20project/docs/18-security.md).
+
+---
+
+### 2.7 Keyed HMAC-SHA256 for Short Numeric OTPs
+- **What the interviewer will ask**: *"If an attacker obtains a read-only dump of your MongoDB database, can they crack your 6-digit email verification OTPs?"*
+- **What you must understand**:
+  - **Small Entropy Problem**: A 6-digit numeric OTP has only $10^6 = 1,000,000$ combinations. An unkeyed hash `SHA-256(OTP)` could be reversed in milliseconds using a precomputed rainbow table.
+  - **Server-Secret Keyed Construction**: We store `HMAC(serverSecret, OTP + ":" + purpose + ":" + email)`. Without the server secret (which is kept strictly in environment variables and never written to the database), an attacker cannot generate or verify rainbow tables offline.
+- **Where demonstrated**: `backend/src/modules/auth/otp.model.js` and [11-authentication.md](file:///c:/Users/vines/react%20first%20project/docs/11-authentication.md).
+
+---
+
+### 2.8 Cookie Security Realities: HttpOnly, SameSite, and Secure
+- **What the interviewer will ask**: *"Does setting HttpOnly on your session cookie completely eliminate XSS vulnerabilities?"*
+- **What you must understand**:
+  - **HttpOnly Reality**: `HttpOnly` prevents client-side JavaScript (`document.cookie`) from directly reading the cookie string. This prevents an attacker from exfiltrating credentials to their external command-and-control server. However, it does **not** prevent malicious scripts from executing authenticated API requests from the victim's browser, because browsers automatically attach cookies to same-origin requests.
+  - **SameSite Reality**: `SameSite: 'lax'` prevents cross-site requests from transmitting cookies in sub-resource requests (images, iframes), providing critical CSRF protection.
+  - **Secure Reality**: `Secure: true` ensures the cookie is only transmitted over encrypted TLS/HTTPS connections in production.
+- **Where demonstrated**: `backend/src/config/session.js` and [18-security.md](file:///c:/Users/vines/react%20first%20project/docs/18-security.md).

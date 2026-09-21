@@ -10,6 +10,10 @@ import WishlistPage from "../pages/WishlistPage";
 import ProfilePage from "../pages/ProfilePage";
 import OrdersPage from "../pages/OrdersPage";
 import AdminDashboardPage from "../pages/AdminDashboardPage";
+import ProductDetailPage from "../pages/ProductDetailPage";
+import AdminCategoriesPage from "../pages/admin/AdminCategoriesPage";
+import AdminBrandsPage from "../pages/admin/AdminBrandsPage";
+import AdminProductsPage from "../pages/admin/AdminProductsPage";
 import NotFoundPage from "../pages/NotFoundPage";
 
 /**
@@ -25,11 +29,15 @@ export const router = createBrowserRouter([
       { path: "login", element: <LoginPage /> },
       { path: "register", element: <RegisterPage /> },
       { path: "shop", element: <ShopPage /> },
+      { path: "products/:slug", element: <ProductDetailPage /> },
       { path: "cart", element: <CartPage /> },
       { path: "wishlist", element: <WishlistPage /> },
       { path: "profile", element: <ProfilePage /> },
       { path: "orders", element: <OrdersPage /> },
       { path: "admin", element: <AdminDashboardPage /> },
+      { path: "admin/categories", element: <AdminCategoriesPage /> },
+      { path: "admin/brands", element: <AdminBrandsPage /> },
+      { path: "admin/products", element: <AdminProductsPage /> },
       { path: "*", element: <NotFoundPage /> }
     ]
   }

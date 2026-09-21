@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const crypto = require("crypto");
+const env = require("../../config/env");
 
 const OTP_PURPOSES = Object.freeze({
   REGISTRATION: "REGISTRATION",
@@ -50,32 +51,54 @@ otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 otpSchema.index({ email: 1, purpose: 1, isUsed: 1 });
 
 /**
- * Generate a cryptographically secure 6-digit OTP and its SHA-256 hash
+ * Retrieve the secret key used for HMAC-SHA256
+ * @returns {string}
+ */
+const getOtpSecret = () => {
+  return env.OTP_SECRET || env.SESSION_SECRET || "dev_otp_hmac_secret_key_minimum_32_characters_long!";
+};
+
+/**
+ * Hash a plain OTP string using server-secret keyed HMAC-SHA256 bound to purpose and email
+ * HMAC(serverSecret, OTP + ":" + purpose + ":" + email)
+ * @param {string} plainOtp
+ * @param {{ purpose: string, email: string }} context
+ * @returns {string} HMAC-SHA256 hex digest
+ */
+otpSchema.statics.hashOtp = function (plainOtp, { purpose, email }) {
+  if (!purpose || !email) {
+    throw new Error("OTP hashing requires both purpose and email context");
+  }
+  const message = `${plainOtp.toString().trim()}:${purpose}:${email.toString().toLowerCase().trim()}`;
+  return crypto.createHmac("sha256", getOtpSecret()).update(message).digest("hex");
+};
+
+/**
+ * Generate a cryptographically secure 6-digit OTP and its keyed HMAC-SHA256 hash
+ * @param {{ purpose: string, email: string }} context
  * @returns {{ plainOtp: string, hashedOtp: string }}
  */
-otpSchema.statics.generateOtp = function () {
+otpSchema.statics.generateOtp = function ({ purpose, email }) {
   const plainOtp = crypto.randomInt(100000, 1000000).toString();
-  const hashedOtp = crypto.createHash("sha256").update(plainOtp).digest("hex");
+  const hashedOtp = this.hashOtp(plainOtp, { purpose, email });
   return { plainOtp, hashedOtp };
 };
 
 /**
- * Hash a plain OTP string using SHA-256
- * @param {string} plainOtp
- * @returns {string} SHA-256 hex string
- */
-otpSchema.statics.hashOtp = function (plainOtp) {
-  return crypto.createHash("sha256").update(plainOtp).digest("hex");
-};
-
-/**
- * Constant-time comparison between submitted plain OTP and stored hash
+ * Constant-time comparison between submitted plain OTP and stored keyed HMAC hash
+ * Verification flow:
+ * 1. Recreate keyed digest using serverSecret, plainOtp, purpose, and email
+ * 2. Constant-time comparison via crypto.timingSafeEqual
  * @param {string} plainOtp
  * @param {string} storedHash
+ * @param {{ purpose: string, email: string }} context
  * @returns {boolean}
  */
-otpSchema.statics.verifyHash = function (plainOtp, storedHash) {
-  const candidateHash = crypto.createHash("sha256").update(plainOtp).digest("hex");
+otpSchema.statics.verifyHash = function (plainOtp, storedHash, { purpose, email }) {
+  if (!plainOtp || !storedHash || !purpose || !email) {
+    return false;
+  }
+  const candidateHash = this.hashOtp(plainOtp, { purpose, email });
   if (candidateHash.length !== storedHash.length) {
     return false;
   }

@@ -96,11 +96,14 @@ describe("Phase 2 — Authentication & User Management (Comprehensive Integratio
         isVerified: false
       });
 
-      // Create known OTP
+      // Create known OTP using keyed HMAC
       await OTP.create({
         email: "otp.user@example.com",
         purpose: OTP_PURPOSES.REGISTRATION,
-        hashedOtp: OTP.hashOtp(plainOtpCode),
+        hashedOtp: OTP.hashOtp(plainOtpCode, {
+          purpose: OTP_PURPOSES.REGISTRATION,
+          email: "otp.user@example.com"
+        }),
         expiresAt: new Date(Date.now() + 5 * 60 * 1000)
       });
     });
@@ -141,7 +144,10 @@ describe("Phase 2 — Authentication & User Management (Comprehensive Integratio
       await OTP.create({
         email: "attempt.limit@example.com",
         purpose: OTP_PURPOSES.REGISTRATION,
-        hashedOtp: OTP.hashOtp("112233"),
+        hashedOtp: OTP.hashOtp("112233", {
+          purpose: OTP_PURPOSES.REGISTRATION,
+          email: "attempt.limit@example.com"
+        }),
         attempts: 5,
         expiresAt: new Date(Date.now() + 5 * 60 * 1000)
       });
@@ -158,10 +164,14 @@ describe("Phase 2 — Authentication & User Management (Comprehensive Integratio
 
     it("should successfully verify valid OTP, activate user, and set session cookie", async () => {
       const validCode = "987654";
+      const validHash = OTP.hashOtp(validCode, {
+        purpose: OTP_PURPOSES.REGISTRATION,
+        email: "otp.user@example.com"
+      });
       await OTP.create({
         email: "otp.user@example.com",
         purpose: OTP_PURPOSES.REGISTRATION,
-        hashedOtp: OTP.hashOtp(validCode),
+        hashedOtp: validHash,
         expiresAt: new Date(Date.now() + 5 * 60 * 1000)
       });
 
@@ -180,7 +190,7 @@ describe("Phase 2 — Authentication & User Management (Comprehensive Integratio
       expect(user.isVerified).toBe(true);
 
       // Verify OTP is marked consumed (single-use)
-      const otp = await OTP.findOne({ email: "otp.user@example.com", hashedOtp: OTP.hashOtp(validCode) });
+      const otp = await OTP.findOne({ email: "otp.user@example.com", hashedOtp: validHash });
       expect(otp.isUsed).toBe(true);
 
       // Verify session cookie was issued
@@ -360,7 +370,10 @@ describe("Phase 2 — Authentication & User Management (Comprehensive Integratio
       await OTP.create({
         email: "security@example.com",
         purpose: OTP_PURPOSES.PASSWORD_RESET,
-        hashedOtp: OTP.hashOtp(otpCode),
+        hashedOtp: OTP.hashOtp(otpCode, {
+          purpose: OTP_PURPOSES.PASSWORD_RESET,
+          email: "security@example.com"
+        }),
         expiresAt: new Date(Date.now() + 5 * 60 * 1000)
       });
 

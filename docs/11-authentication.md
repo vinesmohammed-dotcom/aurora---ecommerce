@@ -28,9 +28,9 @@ A frequent debate in modern web development is **Session-Based Authentication** 
 
 ## 2. Cookie Security Attributes
 The session cookie (`connect.sid`) is configured with strict security flags:
-- `httpOnly: true`: Prevents client-side JavaScript (`document.cookie`) from reading the cookie, neutralizing XSS token exfiltration.
-- `secure: process.env.NODE_ENV === 'production'`: In production, transmitted exclusively over encrypted HTTPS connections.
-- `sameSite: 'lax'`: Protects against Cross-Site Request Forgery (CSRF) by preventing cross-origin subresource transmission while permitting safe top-level user navigations.
+- `httpOnly: true`: Prevents client-side JavaScript (`document.cookie`) from directly reading the cookie string. This completely stops token exfiltration to an attacker's remote server. Note: It does **NOT** prevent malicious injected scripts from dispatching authenticated HTTP requests while the user session is active (which must be prevented via CSP and input/output sanitization).
+- `sameSite: 'lax'`: Reduces cross-site cookie sending and helps mitigate Cross-Site Request Forgery (CSRF) by preventing cross-origin subresource requests from transmitting cookies.
+- `secure: process.env.NODE_ENV === 'production'`: Directs the browser to transmit cookies exclusively over encrypted HTTPS connections in production.
 - `maxAge: 7 * 24 * 60 * 60 * 1000`: 7-day session lifetime with sliding expiration on user activity.
 
 ---
@@ -76,7 +76,7 @@ sequenceDiagram
         Service-->>Client: 409 Conflict ("Email is already registered")
     end
     Service->>Model: Hash password (bcrypt 12 rounds) & create user (isVerified: false)
-    Service->>OTP: Invalidate prior OTPs & insert SHA-256 hashed OTP (TTL 5m)
+    Service->>OTP: Invalidate prior OTPs & insert HMAC-SHA256 hashed OTP (TTL 5m)
     Service->>Email: sendOtpEmail({ email, otp, purpose: 'REGISTRATION' })
     Service-->>Client: 201 Created { message: "Registration initiated..." }
 
@@ -89,18 +89,18 @@ sequenceDiagram
     Session-->>Client: 200 OK (Set-Cookie: connect.sid; httpOnly; Secure)
 ```
 
-### 4.2 OTP Lifecycle & Storage Security
+### 4.2 Keyed HMAC-SHA256 OTP Storage & Lifecycle
 1. **Cryptographically Secure Generation**: Generated using `crypto.randomInt(100000, 1000000)`.
-2. **SHA-256 Hashing at Rest**: OTP values are NEVER stored in plaintext. `crypto.createHash('sha256').update(plainOtp).digest('hex')` is stored in the `otps` collection.
+2. **Keyed HMAC-SHA256 at Rest**: OTP values are NEVER stored in plaintext. Because 6-digit numeric codes have a tiny entropy space ($10^6 = 1,000,000$ values), an unkeyed SHA-256 hash would allow an attacker with a database backup to instantly reverse codes using precomputed rainbow tables. We store `HMAC(serverSecret, OTP + ":" + purpose + ":" + email)`, preventing offline dictionary attacks without the server secret.
 3. **Database TTL Expiration**: MongoDB TTL index `{ expiresAt: 1 }, { expireAfterSeconds: 0 }` automatically purges expired records after 5 minutes.
 4. **Attempt Limit Counter**: Each failed guess increments `attempts`. Upon reaching 5 attempts (`maxAttempts: 5`), the token is locked and invalidated (`isUsed: true`).
-5. **Constant-Time Verification**: Uses `crypto.timingSafeEqual` between candidate buffer and stored hash buffer to defend against side-channel timing attacks.
+5. **Constant-Time Verification**: Uses `crypto.timingSafeEqual` between candidate hash buffer and stored hash buffer to defend against side-channel timing attacks.
 6. **Single-Use Invalidation**: Immediately marked `isUsed: true` upon successful verification, preventing replay attacks.
 
 ### 4.3 Password Hashing Standards
 - Stored in the `users` collection as `passwordHash`.
 - Configured with `select: false` in Mongoose schema to prevent accidental serialization in `find()` queries.
-- Hashed using `bcryptjs` with **12 salt rounds** (computationally secure cost factor).
+- Hashed using `bcryptjs` with **12 salt rounds**. **Bcrypt is an adaptive password-hashing algorithm with a configurable computational cost, designed to make password-guessing attacks expensive.**
 - Custom `toJSON()` on the User schema explicitly strips `passwordHash` and `__v` before returning documents to the caller.
 
 ### 4.4 Account Enumeration Defense

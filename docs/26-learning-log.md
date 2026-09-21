@@ -196,24 +196,24 @@ Every concept below is explained with a **simple real-world analogy first**, fol
 
 ---
 
-### 29. Session Hijacking & Cookie Protections (`httpOnly`, `secure`, `sameSite`)
-- **Real-World Analogy**: A lockbox with three physical defenses: made of lead so X-rays cannot inspect it (`httpOnly`), transportable only via armored guard trucks (`secure`), and refused at the door if delivered by an unknown messenger (`sameSite`).
+### 29. Cookie Security Protections (`httpOnly`, `secure`, `sameSite`)
+- **Real-World Analogy**: An armored bank safe key with specific handling rules: the client cannot duplicate or read the key inscription directly (`httpOnly`), it can only travel in an armored van on encrypted highways (`secure`), and guards reject requests initiated from a rival firm's doorstep (`sameSite`).
 - **Technical Explanation**:
-  - `httpOnly: true`: Prevents `document.cookie` access from JavaScript, neutralizing XSS exfiltration.
-  - `secure: true`: Ensures the cookie is only transmitted over TLS-encrypted HTTPS connections.
-  - `sameSite: 'lax'`: Prevents the browser from sending the cookie during cross-site sub-resource requests, preventing Cross-Site Request Forgery (CSRF).
+  - `httpOnly: true`: Prevents client-side JavaScript (`document.cookie`) from directly reading the cookie string. It does **NOT** prevent malicious injected scripts from dispatching authenticated HTTP requests while the user session is active, but it completely blocks exfiltration of the credential to an attacker's remote server.
+  - `sameSite: 'lax'`: Controls whether cookies are sent with cross-site requests. It reduces cross-site cookie sending and helps mitigate Cross-Site Request Forgery (CSRF).
+  - `secure: true`: Directs the browser to transmit the cookie exclusively over encrypted HTTPS connections in production.
 - **Where it appears**: `backend/src/config/session.js`.
-- **Interview Question**: *"Can an attacker steal a session cookie using an XSS script if `httpOnly` is enabled?"*
-- **Interview Answer**: *"No. With `httpOnly`, browser JavaScript cannot read the cookie string. An attacker may attempt to trigger authenticated requests while the user is active (XSS request forging), but they cannot exfiltrate the raw cookie to impersonate the user from an external machine."*
+- **Interview Question**: *"Does setting `httpOnly: true` on cookies completely prevent XSS attacks?"*
+- **Interview Answer**: *"No. HttpOnly prevents JavaScript from directly reading the cookie string, which stops token exfiltration to an attacker-controlled server. However, an attacker who successfully executes arbitrary JavaScript in the victim's browser can still make authenticated requests (e.g. using `fetch()` or `axios`) on behalf of the user, because the browser automatically attaches cookies to same-origin requests. Full XSS prevention requires strict input sanitization, output encoding, and Content Security Policy (CSP)."*
 
 ---
 
-### 30. Password Hashing & Salt Rounds (Bcrypt)
-- **Real-World Analogy**: Passing a raw document through a paper shredder that also mixes in a handful of random confetti (`salt`) and re-shreds the mixture 4,096 times (`2^12` rounds). You can never reassemble the document, but you can confirm if a new document shreds to the exact same pile.
-- **Technical Explanation**: Plaintext passwords must never be stored. Bcrypt applies a computationally intensive key derivation function with an automatically generated random salt. Cost factor 12 (`2^12 = 4,096` iterations) takes ~250ms per check on modern CPUs, making rainbow tables useless and GPU-accelerated brute-force attacks economically infeasible.
+### 30. Password Hashing & Computational Cost (Bcrypt)
+- **Real-World Analogy**: A safe with an adjustable time-delay lock. Instead of opening instantly, the lock gears turn slowly for 250 milliseconds every time you turn the key. To a legitimate user entering their password once, 250ms feels instantaneous; to an attacker trying 1 billion guesses, it would take centuries.
+- **Technical Explanation**: **Bcrypt is an adaptive password-hashing algorithm with a configurable computational cost, designed to make password-guessing attacks expensive.** It incorporates a work factor (salt rounds) that can be increased as hardware improves. Cost factor 12 (`2^12 = 4,096` iterations) takes ~250ms per hash on modern processors, rendering offline brute-force attacks and rainbow tables economically and computationally infeasible.
 - **Where it appears**: `backend/src/modules/users/user.model.js`.
-- **Interview Question**: *"Why is SHA-256 considered bad for password storage while bcrypt is recommended?"*
-- **Interview Answer**: *"SHA-256 is designed to be fast and compute millions of hashes per second for file integrity checks. An attacker with a consumer GPU can test billions of SHA-256 guesses per second. Bcrypt is deliberately slow and memory-intensive, with configurable work factors to defeat hardware-accelerated attacks."*
+- **Interview Question**: *"What makes bcrypt an adaptive password-hashing algorithm, and why is that superior to fast algorithms like SHA-256 for passwords?"*
+- **Interview Answer**: *"Bcrypt is adaptive because its computational cost (work factor / salt rounds) can be dialed up over time to match increases in computer processing power without changing the underlying algorithm. Fast hash algorithms like SHA-256 are engineered for high-throughput checksum verification and can compute billions of guesses per second on consumer GPUs. Bcrypt is intentionally slow and computationally expensive, frustrating parallel brute-force guessing attacks."*
 
 ---
 
@@ -226,12 +226,12 @@ Every concept below is explained with a **simple real-world analogy first**, fol
 
 ---
 
-### 32. OTP Generation, Hashing & Storage
-- **Real-World Analogy**: A 5-minute single-entry wristband with a barcode. The entry guard does not keep a photo of the wristband; he only stores the scanned hash of the barcode.
-- **Technical Explanation**: One-Time Passwords (OTPs) are generated using cryptographically secure pseudorandom numbers (`crypto.randomInt(100000, 1000000)`). Before saving to MongoDB, the code computes a one-way SHA-256 hash. The plaintext OTP is emailed to the user and never persisted in database storage.
-- **Where it appears**: `backend/src/modules/auth/otp.model.js` and `backend/src/modules/auth/auth.service.js`.
-- **Interview Question**: *"Why should you hash OTPs in the database if they expire in 5 minutes anyway?"*
-- **Interview Answer**: *"If a read-only database replica is compromised or a developer inspects raw database query logs, plaintext OTPs allow an attacker to hijack active registration or password reset flows in real time. Storing SHA-256 hashes ensures even a full database dump yields zero usable OTPs."*
+### 32. Keyed OTP Hashing & Short Numeric Code Security
+- **Real-World Analogy**: A temporary one-time pass signed by an invisible ink stamp known only to the bank vault manager. Even if a spy steals the paper, he cannot forge or decode the pass because he doesn't have the secret ink formula.
+- **Technical Explanation**: A 6-digit numeric OTP has only $10^6 = 1,000,000$ possible combinations (from 000000 to 999999). If stored as a simple `SHA-256(OTP)`, an attacker who obtains a database read dump could precompute all 1,000,000 hashes in a fraction of a second and invert the OTP immediately. By utilizing a server-secret keyed **HMAC-SHA256** construction—`HMAC(serverSecret, OTP + ":" + purpose + ":" + email)`—an attacker cannot compute rainbow tables or guess the OTP offline without the private server secret.
+- **Where it appears**: `backend/src/modules/auth/otp.model.js`.
+- **Interview Question**: *"Why is a standard unkeyed SHA-256 hash insufficient for storing a 6-digit numeric OTP?"*
+- **Interview Answer**: *"Because 6-digit numeric OTPs have a trivial entropy space of only one million possible values. An attacker with access to a database backup could generate a complete lookup table of all 1,000,000 SHA-256 hashes in milliseconds. A keyed HMAC construction bound to a secret server key, user email, and purpose makes offline dictionary or rainbow table attacks impossible without the server secret."*
 
 ---
 

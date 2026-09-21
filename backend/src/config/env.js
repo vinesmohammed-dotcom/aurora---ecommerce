@@ -29,6 +29,7 @@ const env = Object.freeze({
   PORT: parseInt(process.env.PORT || "5000", 10),
   MONGODB_URI: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/ecommerce_dev",
   SESSION_SECRET: process.env.SESSION_SECRET || "dev_session_secret_replace_in_production_min_32_chars!",
+  OTP_SECRET: process.env.OTP_SECRET || process.env.SESSION_SECRET || "dev_otp_hmac_secret_key_minimum_32_characters_long!",
   FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:5173"
 });
 
