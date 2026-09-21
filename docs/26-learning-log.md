@@ -160,3 +160,172 @@ Every concept below is explained with a **simple real-world analogy first**, fol
 ### 25. What is PM2?
 - **Real-World Analogy**: A loyal mechanic sitting in the passenger seat of your delivery truck. If the truck engine stalls, he immediately turns the key and restarts it within half a second, keeping a logbook of every sputter.
 - **Technical Explanation**: A **Production Process Manager** for Node.js. It keeps our backend running 24/7, automatically restarts the app if an unhandled crash occurs, and runs multiple instances across CPU cores (clustering) for high availability.
+
+---
+
+## Phase 1 Extension: Cloud Health Checks
+
+### 26. Liveness Probe vs Readiness Probe
+- **Real-World Analogy**: Checking if a restaurant cook is breathing and conscious (Liveness) versus checking if the cook has ingredients in the kitchen and an oven turned on to prepare dishes (Readiness).
+- **Technical Explanation**: Cloud load balancers (AWS ALB, Kubernetes) evaluate two distinct lifecycle states:
+  - **Liveness (`GET /api/v1/health`)**: Verifies the Node.js event loop is spinning and HTTP listener is accepting connections. If it fails, the process is restarted.
+  - **Readiness (`GET /api/v1/health/ready`)**: Verifies backing dependencies (MongoDB) are reachable. If it fails (HTTP 503), the load balancer temporarily diverts traffic away from this instance until the database reconnects, without restarting the process.
+- **Where it appears**: `backend/src/modules/health/health.controller.js`.
+- **Interview Question**: *"Why should you never mix database connection checks into a container liveness probe?"*
+- **Interview Answer**: *"If MongoDB suffers a brief network hiccup, every container instance whose liveness probe checks MongoDB will simultaneously fail and restart. This triggers a cascading restart loop (thundering herd) across your cluster, crashing your entire server infrastructure while the database is attempting to recover."*
+
+---
+
+## Phase 2: Authentication & User Management Concepts
+
+### 27. Authentication vs Authorization
+- **Real-World Analogy**: Presenting your passport at airport customs proves who you are (Authentication). Your boarding pass proves whether you are permitted to board Flight 302 to London or enter the first-class lounge (Authorization).
+- **Technical Explanation**: Authentication verifies identity using credentials (email, password, OTP, session cookie). Authorization determines permissions (e.g. `USER` vs `ADMIN`) and data access rights (e.g. can this customer view order `#102`?).
+- **Where it appears**: `backend/src/middlewares/auth.middleware.js` via `requireAuth` and `requireRole`.
+- **Interview Question**: *"What HTTP status code should be returned if a user is not logged in versus when a logged-in user tries to access an admin route?"*
+- **Interview Answer**: *"Return HTTP 401 Unauthorized when authentication is missing or invalid (the server does not know who the client is). Return HTTP 403 Forbidden when authentication succeeded but the user lacks sufficient roles or permissions."*
+
+---
+
+### 28. Stateful Sessions vs Stateless JWTs
+- **Real-World Analogy**: An electronic keycard registered in a hotel front-desk computer (Stateful Session) versus an embossed plastic VIP badge stamped with an expiration date (Stateless JWT). If you get banned from the hotel, the front desk deactivates your keycard immediately in the database. The embossed badge cannot be cancelled until its expiration date passes unless a complex blacklist is built.
+- **Technical Explanation**: Stateful sessions store user login records on the server (MongoDB via `connect-mongo`) and transmit an opaque random cookie (`connect.sid`). Stateless JWTs pack user identity into a base64 string stored client-side. Stateful sessions provide immediate server-side revocation control (e.g. admin bans user or user logs out) and zero exposure to XSS token theft.
+- **Where it appears**: `backend/src/config/session.js`.
+- **Interview Question**: *"Why is storing stateless JWTs in browser `localStorage` considered a major security anti-pattern in commercial e-commerce?"*
+- **Interview Answer**: *"Any third-party script, compromised CDN library, or XSS flaw can read `localStorage` via `window.localStorage` and exfiltrate tokens to an attacker's server. Because the token is stateless, the server cannot revoke it until expiration. Storing session IDs in `httpOnly` cookies makes them completely invisible to client JavaScript."*
+
+---
+
+### 29. Session Hijacking & Cookie Protections (`httpOnly`, `secure`, `sameSite`)
+- **Real-World Analogy**: A lockbox with three physical defenses: made of lead so X-rays cannot inspect it (`httpOnly`), transportable only via armored guard trucks (`secure`), and refused at the door if delivered by an unknown messenger (`sameSite`).
+- **Technical Explanation**:
+  - `httpOnly: true`: Prevents `document.cookie` access from JavaScript, neutralizing XSS exfiltration.
+  - `secure: true`: Ensures the cookie is only transmitted over TLS-encrypted HTTPS connections.
+  - `sameSite: 'lax'`: Prevents the browser from sending the cookie during cross-site sub-resource requests, preventing Cross-Site Request Forgery (CSRF).
+- **Where it appears**: `backend/src/config/session.js`.
+- **Interview Question**: *"Can an attacker steal a session cookie using an XSS script if `httpOnly` is enabled?"*
+- **Interview Answer**: *"No. With `httpOnly`, browser JavaScript cannot read the cookie string. An attacker may attempt to trigger authenticated requests while the user is active (XSS request forging), but they cannot exfiltrate the raw cookie to impersonate the user from an external machine."*
+
+---
+
+### 30. Password Hashing & Salt Rounds (Bcrypt)
+- **Real-World Analogy**: Passing a raw document through a paper shredder that also mixes in a handful of random confetti (`salt`) and re-shreds the mixture 4,096 times (`2^12` rounds). You can never reassemble the document, but you can confirm if a new document shreds to the exact same pile.
+- **Technical Explanation**: Plaintext passwords must never be stored. Bcrypt applies a computationally intensive key derivation function with an automatically generated random salt. Cost factor 12 (`2^12 = 4,096` iterations) takes ~250ms per check on modern CPUs, making rainbow tables useless and GPU-accelerated brute-force attacks economically infeasible.
+- **Where it appears**: `backend/src/modules/users/user.model.js`.
+- **Interview Question**: *"Why is SHA-256 considered bad for password storage while bcrypt is recommended?"*
+- **Interview Answer**: *"SHA-256 is designed to be fast and compute millions of hashes per second for file integrity checks. An attacker with a consumer GPU can test billions of SHA-256 guesses per second. Bcrypt is deliberately slow and memory-intensive, with configurable work factors to defeat hardware-accelerated attacks."*
+
+---
+
+### 31. Password Hash Visibility (`select: false`)
+- **Real-World Analogy**: Marking a filing cabinet folder so that pulling "Customer Details" automatically hides the locked compartment containing their bank safe combination unless you explicitly ask for the combination key.
+- **Technical Explanation**: In Mongoose schemas, setting `select: false` on `passwordHash` ensures that standard queries (`User.findOne`, `User.find`) exclude the field by default. If the password hash is needed for authentication, the service must explicitly invoke `.select('+passwordHash')`.
+- **Where it appears**: `backend/src/modules/users/user.model.js`.
+- **Interview Question**: *"What security disaster does `select: false` prevent in controller responses?"*
+- **Interview Answer**: *"It prevents accidental password hash leakage. If a developer runs `const user = await User.findById(id)` and returns `res.json(user)`, the password hash is excluded from the query projection, preventing unintentional credential exposure."*
+
+---
+
+### 32. OTP Generation, Hashing & Storage
+- **Real-World Analogy**: A 5-minute single-entry wristband with a barcode. The entry guard does not keep a photo of the wristband; he only stores the scanned hash of the barcode.
+- **Technical Explanation**: One-Time Passwords (OTPs) are generated using cryptographically secure pseudorandom numbers (`crypto.randomInt(100000, 1000000)`). Before saving to MongoDB, the code computes a one-way SHA-256 hash. The plaintext OTP is emailed to the user and never persisted in database storage.
+- **Where it appears**: `backend/src/modules/auth/otp.model.js` and `backend/src/modules/auth/auth.service.js`.
+- **Interview Question**: *"Why should you hash OTPs in the database if they expire in 5 minutes anyway?"*
+- **Interview Answer**: *"If a read-only database replica is compromised or a developer inspects raw database query logs, plaintext OTPs allow an attacker to hijack active registration or password reset flows in real time. Storing SHA-256 hashes ensures even a full database dump yields zero usable OTPs."*
+
+---
+
+### 33. MongoDB TTL Indexes (Time-To-Live)
+- **Real-World Analogy**: Self-destructing paper that dissolves into thin air exactly 5 minutes after being printed.
+- **Technical Explanation**: A MongoDB specialized index on date fields (`{ expiresAt: 1 }, { expireAfterSeconds: 0 }`). A background thread running inside MongoDB evaluates the index every 60 seconds and automatically deletes expired documents without requiring external cron jobs or background cleanup scripts.
+- **Where it appears**: `backend/src/modules/auth/otp.model.js`.
+- **Interview Question**: *"How does a MongoDB TTL index work and when does deletion actually occur?"*
+- **Interview Answer**: *"MongoDB runs an internal background thread every 60 seconds that reads the TTL index and purges documents where `expiresAt + expireAfterSeconds <= current_time`. Because the worker runs once a minute, deletion may lag expiration by up to 60 seconds, so application queries should still include an explicit `$gt: new Date()` check for exact enforcement."*
+
+---
+
+### 34. Timing Attacks & Constant-Time Comparison
+- **Real-World Analogy**: A combination lock that makes an audible click on the first dial if the digit is correct, but stays silent if incorrect. A burglar can listen for the click to determine the first digit in 10 tries rather than testing 10,000 combinations.
+- **Technical Explanation**: Standard string comparisons (`str1 === str2`) return `false` on the first non-matching character (early exit). Attackers measuring response latency down to microseconds can deduce valid characters one by one. `crypto.timingSafeEqual` compares buffers in constant time regardless of where mismatches occur.
+- **Where it appears**: `backend/src/modules/auth/otp.model.js` (`verifyOtpHash`).
+- **Interview Question**: *"What is a timing attack and how do you protect verification codes against it?"*
+- **Interview Answer**: *"A timing attack exploits execution time variances in string equality checks to reveal secret values byte-by-byte. We protect against it by comparing cryptographic hashes using constant-time comparison functions like Node's native `crypto.timingSafeEqual`."*
+
+---
+
+### 35. Tiered Rate Limiting
+- **Real-World Analogy**: A public park water fountain that lets anyone take sips continuously, but limits you to filling 5 large jugs per hour so the community tank doesn't run dry.
+- **Technical Explanation**: Express middleware (`express-rate-limit`) tracking client IP request counts in memory across sliding time windows. Different endpoint tiers require different limits: general browsing allows 1,000 requests per 15 minutes, while `/login` is restricted to 10 requests, and sensitive `/forgot-password` or OTP dispatches are restricted to 5 requests per 15 minutes.
+- **Where it appears**: `backend/src/middlewares/rateLimiter.middleware.js`.
+- **Interview Question**: *"Why is IP-based rate limiting alone insufficient in distributed attacks?"*
+- **Interview Answer**: *"Attackers can use botnets or distributed proxy networks with thousands of distinct residential IP addresses to bypass per-IP limits. Rate limiting should be combined with account-level lockouts, CAPTCHAs, and anomaly detection."*
+
+---
+
+### 36. Account Enumeration Prevention
+- **Real-World Analogy**: Calling a receptionist and asking if 'John Smith' works there. Instead of saying 'Yes, he does' or 'No, no John Smith here', the receptionist replies uniformly: 'If John Smith works here, we will deliver your message to his desk.'
+- **Technical Explanation**: If an API returns `404 User Not Found` on password reset requests for unregistered emails and `200 OK` for registered emails, attackers can script requests across leaked email lists to identify platform customers. Returning identical 200 OK success envelopes for all inputs neutralizes enumeration.
+- **Where it appears**: `backend/src/modules/auth/auth.service.js` (`requestPasswordReset`).
+- **Interview Question**: *"How do you design a password reset endpoint to prevent email enumeration?"*
+- **Interview Answer**: *"Always return an identical HTTP 200 response with a neutral message like 'If an account exists with this email, a reset code has been sent', regardless of whether the email is present in the database. Ensure response timing is normalized so database lookup differences do not leak presence."*
+
+---
+
+### 37. Layered Architecture Separation of Concerns
+- **Real-World Analogy**: An international restaurant kitchen: The Hostess (Route) directs guests; the Waiter (Middleware/Controller) takes orders and returns plated food; the Executive Chef (Service) executes the recipe and calculations; the Pantry Manager (Model) retrieves ingredients from the walk-in cooler (Database).
+- **Technical Explanation**:
+  - `Routes`: Map HTTP paths and verbs to handler functions.
+  - `Middlewares`: Validate schemas, authenticate sessions, enforce rate limits.
+  - `Controllers`: Extract `req.body`/`req.params`, invoke domain services, send formatted `ApiResponse`.
+  - `Services`: Contain 100% of domain business logic and orchestration.
+  - `Models`: Define schema validations, indexes, and persistence methods.
+- **Where it appears**: `backend/src/modules/auth/` and `backend/src/modules/users/`.
+- **Interview Question**: *"Why shouldn't business logic live inside Express controllers?"*
+- **Interview Answer**: *"Coupling business logic to controllers ties rules to HTTP `req` and `res` objects. This makes unit testing difficult (requires heavy mocking of Express objects), prevents code reuse across CLI scripts or message workers, and results in unmaintainable 'fat controllers'."*
+
+---
+
+### 38. The Repository Rule (Where Useful vs Direct Mongoose)
+- **Real-World Analogy**: Hiring a full-time translator who only repeats every English sentence in English. If two people already speak the same language, adding an unnecessary middleman just slows down the conversation.
+- **Technical Explanation**: The Repository pattern abstracts persistence queries. However, Mongoose `Model` is already an Active Record / Repository implementation. Writing thin wrappers that merely forward `findById` or `create` without additional query logic introduces boilerplate with zero benefit. Repositories are introduced only when query complexity, multi-collection aggregation pipelines, or data-source swapping warrants it.
+- **Where it appears**: `backend/src/modules/auth/auth.service.js`.
+- **Interview Question**: *"When should you introduce a Repository layer in a Node.js Mongoose application?"*
+- **Interview Answer**: *"Introduce a repository when query logic is complex, repeated across multiple services, involves intricate aggregation pipelines, or when you need an abstraction layer to mock persistence in unit tests without depending on Mongoose internals. Avoid creating trivial pass-through repositories for simple CRUD queries."*
+
+---
+
+### 39. Input Validation with Zod
+- **Real-World Analogy**: The automated sizing and metal detector gate at airport security. If your luggage is overweight or contains prohibited items, you are stopped at the gate before you ever board the plane.
+- **Technical Explanation**: Zod provides schema declaration and type validation at runtime. If request payloads fail schema rules (e.g. invalid email format, short password), execution halts immediately in middleware, returning HTTP 422 with detailed field-level errors without touching controllers, services, or databases.
+- **Where it appears**: `backend/src/middlewares/validate.middleware.js` and `*.validator.js`.
+- **Interview Question**: *"Why validate with Zod at the middleware layer if Mongoose already validates schemas?"*
+- **Interview Answer**: *"Mongoose validates at the database boundary, which is the last line of defense. Validating at the HTTP entry boundary with Zod rejects malformed payloads immediately, avoids running unnecessary database queries, sanitizes types, and returns consistent, friendly API validation envelopes."*
+
+---
+
+### 40. Request-Scoped Data vs Session Data
+- **Real-World Analogy**: Wearing a name tag during a 2-hour conference workshop (Request-Scoped) versus having your name permanently recorded in the hotel guest registry for your 7-day stay (Session Data).
+- **Technical Explanation**:
+  - `req.user`: Request-scoped. Created on each HTTP request by `requireAuth` middleware, lives for milliseconds during the request lifecycle, and is garbage collected when the response finishes.
+  - `req.session`: Session-scoped. Persisted in MongoDB, lives across days, and stores only identity pointers (`userId`, `role`).
+- **Where it appears**: `backend/src/middlewares/auth.middleware.js`.
+- **Interview Question**: *"Why shouldn't you store the entire user document inside `req.session`?"*
+- **Interview Answer**: *"Storing full user documents in the session store creates stale data bugs when user profile fields change, and bloats the MongoDB session storage and network transfer size on every request. Only store minimal identity pointers (`userId`, `role`) in the session, and populate fresh user data on demand into `req.user`."*
+
+---
+
+### 41. Single-Use Tokens & Replay Prevention
+- **Real-World Analogy**: A movie ticket with a barcode that is torn in half by the usher upon entry. Even if you pick the torn ticket off the floor, you cannot use it to enter a second theater.
+- **Technical Explanation**: When an OTP is verified, its database record is immediately updated with `isUsed: true`. Any subsequent verification attempts using the same code are rejected, defeating replay attacks.
+- **Where it appears**: `backend/src/modules/auth/otp.model.js` and `auth.service.js`.
+- **Interview Question**: *"How do you prevent token replay attacks during OTP verification?"*
+- **Interview Answer**: *"Mark the token as used (`isUsed: true`) or delete it immediately within the same database update operation upon successful verification. Check `isUsed === false` in the query filter so concurrent or repeated attempts are rejected."*
+
+---
+
+### 42. Supertest In-Memory Integration Testing
+- **Real-World Analogy**: A flight simulator where pilots test full cockpit controls and emergency procedures without burning jet fuel or risking a real airplane.
+- **Technical Explanation**: Supertest accepts the Express `app` instance and dispatches HTTP requests via Node's internal stream duplex pipes (`http.Server` in-memory simulation). It tests the complete middleware stack, routing, validations, and database interactions without binding to actual operating system network ports, eliminating port collisions during parallel test runs.
+- **Where it appears**: `backend/tests/auth.test.js`.
+- **Interview Question**: *"What is the advantage of using Supertest over making Axios requests against a running `localhost:5000` server during tests?"*
+- **Interview Answer**: *"Testing against a running port requires starting and stopping background server processes, risks port conflicts in CI/CD environments, and is slower due to OS socket allocation. Supertest operates in-process via Node streams, providing fast, deterministic, and isolated HTTP assertions."*

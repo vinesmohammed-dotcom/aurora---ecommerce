@@ -1,15 +1,15 @@
 const { Router } = require("express");
 const healthRoutes = require("../modules/health/health.routes");
+const authRoutes = require("../modules/auth/auth.routes");
+const userRoutes = require("../modules/users/user.routes");
 
 const apiRouter = Router();
 
 // Mount Health Check endpoint: /api/v1/health
 apiRouter.use("/health", healthRoutes);
 
-// Future module routes will be mounted cleanly here:
-// apiRouter.use("/auth", authRoutes);
-// apiRouter.use("/products", productRoutes);
-// apiRouter.use("/cart", cartRoutes);
-// apiRouter.use("/orders", orderRoutes);
+// Mount Authentication & User Endpoints
+apiRouter.use("/auth", authRoutes);
+apiRouter.use("/users", userRoutes);
 
 module.exports = apiRouter;

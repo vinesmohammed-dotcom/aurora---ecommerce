@@ -6,17 +6,21 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
 ---
 
 ## 2. Current Status
-- **Current Phase**: **PHASE 1: Project Foundation (COMPLETED & VERIFIED)**
-- **Next Phase**: **PHASE 2: Authentication & User Management**
+- **Current Phase**: **PHASE 2: Authentication & User Management (COMPLETED & VERIFIED)**
+- **Next Phase**: **PHASE 3: Product Catalog, Categories & Search**
 - **Tested Foundations**:
-  - Express application cleanly separated from HTTP server (`app.js` vs `server.js`).
-  - Mongoose connection and MongoDB session store (`connect-mongo`).
-  - Security middlewares: Helmet, strict CORS, request size limit (`10kb`), rate limiting.
-  - Centralized operational error handling (`AppError`, `asyncHandler`, `errorMiddleware`).
-  - Standardized API envelope (`ApiResponse`) and `/api/v1/health` endpoint.
-  - Automated smoke test suite using **Vitest** and **Supertest** passing 100%.
-  - Frontend scaffolded with **React 18, Vite, Tailwind CSS, Redux Toolkit, and React Router**.
-  - Verified frontend production build compiling cleanly with zero errors.
+  - Express 5 application cleanly decoupled from HTTP server (`app.js` vs `server.js`).
+  - Dual healthcheck probes: Liveness (`GET /api/v1/health`) and Readiness (`GET /api/v1/health/ready`).
+  - Mongoose connection and MongoDB session store (`connect-mongo`) with `httpOnly`, `sameSite: 'lax'` cookies.
+  - Security middlewares: Helmet, strict CORS, body limits (`10kb`), tiered rate limiting (`apiRateLimiter`, `authLimiter`, `otpLimiter`).
+  - Centralized operational error handling (`AppError`, Express 5 native async routing, `errorMiddleware`, Zod 422 mapping).
+  - User model with bcrypt 12 salt rounds, `select: false` on passwordHash, custom `toJSON` stripping secrets.
+  - OTP model with SHA-256 hash storage, 5-minute MongoDB TTL index, attempt limits, and constant-time verification.
+  - Complete authentication flows: registration, OTP verification, resend, login, logout, `/me`, uniform forgot password, reset password, change password, email change.
+  - User profile management strictly scoped to session identity to defeat IDOR.
+  - Automated integration test suite using **Vitest** and **Supertest** passing 25/25 tests (100%).
+  - Frontend scaffolded with **React 18, Vite 6, Tailwind CSS, Redux Toolkit, and React Router**.
+  - Verified frontend production build compiling cleanly in 2.76s with zero errors.
 
 ---
 
@@ -26,7 +30,7 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
 | :--- | :--- | :--- | :--- |
 | **Phase 0** | Requirements, Architecture & Blueprint | **Completed** | [phase-00-report.md](file:///c:/Users/vines/react%20first%20project/docs/reports/phase-00-report.md) |
 | **Phase 1** | Technical Foundation & Scaffolding | **Completed** | [phase-01-report.md](file:///c:/Users/vines/react%20first%20project/docs/reports/phase-01-report.md) |
-| **Phase 2** | Customer Auth & Account Management | *Pending* | Phase 2 Blueprint |
+| **Phase 2** | Customer Auth & Account Management | **Completed** | [phase-02-report.md](file:///c:/Users/vines/react%20first%20project/docs/reports/phase-02-report.md) |
 | **Phase 3** | Product Catalog, Search & Filtering | *Pending* | Phase 3 Blueprint |
 | **Phase 4** | Cart, Wishlist & Concurrency | *Pending* | Phase 4 Blueprint |
 | **Phase 5** | Multi-Stage Checkout & Coupons | *Pending* | Phase 5 Blueprint |
@@ -38,7 +42,9 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
 
 ---
 
-## 4. Phase 1 Verification Summary
-- **Backend Smoke Test (`tests/health.test.js`)**: Passed 2/2 tests.
-- **Frontend Build (`npm run build`)**: Compiled successfully to `frontend/dist`.
-- **Git State**: Initialized repository with `.gitignore` shielding `.env` and `node_modules`.
+## 4. Phase 2 Verification Summary
+- **Backend Test Suite (`npm test`)**: Passed 25/25 tests across 2 test files in 10.11s.
+  - `tests/health.test.js`: 3 tests passed (Liveness probe, Readiness connected, Readiness disconnected 503).
+  - `tests/auth.test.js`: 22 tests passed (Registration, OTP validation, attempt limits, single-use, login, blocked/unverified guards, session cookies, logout, uniform forgot-password, reset password, change password, email change).
+- **Frontend Production Build (`npm run build`)**: Compiled successfully to `frontend/dist` in 2.76s.
+- **Git State**: Clean commit ready for Phase 2.

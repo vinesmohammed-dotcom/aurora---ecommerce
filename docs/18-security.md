@@ -1,30 +1,44 @@
 # 18 — Comprehensive Security Architecture & Threat Mitigation Plan
 
 ## 1. Security Philosophy: Defense in Depth
-Security in a commercial e-commerce system cannot rely on a single defensive layer. We employ **Defense in Depth**—layering controls across network, transport, application, session, database, and cloud infrastructure.
+Security in our e-commerce platform relies on **Defense in Depth**—layering controls across transport, application, session, database, and operational boundaries.
 
 ---
 
-## 2. Threat Modeling & Mitigation Matrix
+## 2. Threat Modeling & Implementation Matrix
 
 | Attack Vector / Vulnerability | Threat Description | Architectural Mitigation Strategy |
 | :--- | :--- | :--- |
-| **Client-Side Price Manipulation** | Malicious user intercepts checkout HTTP call and modifies final payable amount from ₹5,000 to ₹1. | **Zero Client Trust**: Backend completely re-fetches product prices from MongoDB, recomputes discounts/coupons, and supplies the price directly to Razorpay's server API. |
-| **Credential Stuffing & Brute Force** | Automated bot scripts firing thousands of password guesses against `/api/v1/auth/login`. | **Rate Limiting (`express-rate-limit`)**: Enforces max 5 login attempts per 15 minutes per IP. Progressive backoff and CAPTCHA support. |
-| **OTP Flooding & SMS/Email Bombing** | Attackers abusing `/api/v1/auth/resend-otp` to rack up massive AWS SES bills and spam victims. | **Cooldown Enforcement**: Enforce a 60-second cooldown between OTP requests. Max 3 OTP generations per email per hour. Strict 5-minute TTL. |
-| **Session Hijacking & XSS Token Theft** | Cross-Site Scripting (XSS) injecting scripts to steal auth tokens from browser storage. | **`httpOnly` + `Secure` Cookies**: Session cookies cannot be read by `document.cookie`. XSS cannot exfiltrate the session ID. Passwords hashed with bcrypt (12 salt rounds). |
-| **Cross-Site Request Forgery (CSRF)** | Malicious site tricking a logged-in user's browser into executing unauthorized actions. | **`SameSite: 'lax'` + Custom Headers**: Cookies are blocked from being transmitted on cross-origin AJAX requests. Axios sends explicit `X-Requested-With` header. |
-| **NoSQL / Mongo Injection** | Attacker submitting `{ "$gt": "" }` in login password field to bypass authentication. | **`express-mongo-sanitize` + Zod**: Sanitizes request inputs by stripping keys beginning with `$` or `.`. Zod guarantees password is a strict primitive string. |
-| **Cross-Origin Resource Sharing (CORS)** | Unauthorized third-party web domains making API calls to our backend. | **Strict Origin Whitelist**: CORS middleware configured to accept requests ONLY from the explicit frontend production domain (`https://store.yourdomain.com`). |
-| **Insecure Direct Object Reference (IDOR)**| Customer modifying URL from `/orders/101` to `/orders/102` to view someone else's order. | **`isOrderOwner` Middleware**: Server explicitly validates `order.user.equals(req.session.userId)` before returning any order or invoice data. |
-| **Malicious File Uploads** | Attacker uploading an executable `.php` or `.sh` script disguised as a product image. | **Multer Memory Storage + Mime Check**: Server verifies magic byte MIME type (`image/jpeg`, `image/png`, `image/webp`). Files are assigned cryptographically random UUID names before upload to S3; never stored on EC2 disk. |
-| **AWS S3 Bucket Leakage** | S3 bucket misconfigured with public write/delete permissions. | **IAM Least Privilege**: AWS IAM credentials granted only `s3:PutObject` and `s3:GetObject` on the specific bucket ARN. Bucket blocks public ACL writes. |
-| **Payment Signature Forgery** | Attacker constructing fake Razorpay success callbacks to confirm unpaid orders. | **HMAC-SHA256 Constant-Time Verification**: Server calculates signature using secret key and validates with `crypto.timingSafeEqual`. Webhook signature strictly verified via `X-Razorpay-Signature`. |
-| **Sensitive Data Logging** | Developer logging raw `req.body` containing plaintext passwords, credit cards, or OTPs. | **Log Sanitization**: Request loggers (Morgan/Winston) pass through a redactor middleware that strips `password`, `otp`, `cardNumber`, and `token` fields. |
+| **Credential Stuffing & Brute Force** | Automated bot scripts firing thousands of password guesses against `/api/v1/auth/login`. | **Tiered Rate Limiting (`express-rate-limit`)**: `authLimiter` limits authentication attempts to 10 requests per 15 minutes per IP. Sensitive OTP endpoints limited by `otpLimiter` (5 requests per 15 minutes). |
+| **OTP Flooding & SMS/Email Bombing** | Attackers abusing OTP generation to spam victims and exhaust mail service quotas. | **Per-IP Rate Limits & TTL Invalidation**: `otpLimiter` throttles requests. Invalidation of prior active tokens on resend prevents token piling. 5-minute database TTL auto-purges expired tokens. |
+| **Session Hijacking & XSS Token Theft** | Cross-Site Scripting (XSS) injecting JavaScript to steal auth tokens from browser storage. | **`httpOnly` + `Secure` + `SameSite` Cookies**: Session cookies cannot be read via `document.cookie`. XSS cannot exfiltrate the session token. State is held in server MongoDB sessions. |
+| **Cross-Site Request Forgery (CSRF)** | Malicious site tricking authenticated browser into sending unauthorized commands. | **`SameSite: 'lax'` + Origin Checking**: Cookies are blocked from being transmitted on cross-origin AJAX calls. CORS origin strictly validates allowed frontend origins. |
+| **Timing Attacks on Verification Tokens** | Attackers measuring response times to deduce valid OTP digits character by character. | **Constant-Time String Comparison**: Verification uses `crypto.timingSafeEqual` between candidate hash buffer and stored hash buffer to guarantee uniform execution time. |
+| **Account Enumeration** | Attackers probing password reset or registration endpoints to discover registered customer emails. | **Uniform Response Messages**: `POST /api/v1/auth/forgot-password` returns the exact same 200 OK message regardless of whether the user exists. |
+| **Credential Exposure at Rest** | Database compromise or read replica leakage exposing customer credentials. | **`bcryptjs` (12 Salt Rounds) & `select: false`**: Passwords hashed with high-work-factor bcrypt. Mongoose schema marks `passwordHash` as `select: false` and strips it in `toJSON()` serialization. |
+| **Plaintext Token Leakage** | Database compromise exposing active one-time verification passwords. | **SHA-256 Hashing at Rest**: OTP values are converted to SHA-256 digests prior to storage in the `otps` collection. Raw OTPs exist only in memory during email transmission. |
+| **Insecure Direct Object Reference (IDOR)**| Customer modifying URL parameter to view or edit another customer's profile. | **Scoped Session Identity**: Profile and password update endpoints extract identity strictly from `req.user._id`, ignoring any client-supplied ID parameters. |
+| **NoSQL / Mongo Injection** | Attacker submitting `{ "$gt": "" }` in password field to bypass query checks. | **Zod Schema Validation**: Input validator enforces strict primitive types (e.g. `z.string().min(8)`), throwing 422 errors if objects or operators are passed. |
+| **Sensitive Data in Logs** | Plaintext credentials appearing in access logs or debugging output. | **Log Scrubbing**: Morgan logger is configured to log request metadata only (method, URL, status code, response time), omitting request bodies. |
 
 ---
 
-## 3. Environment & Secret Governance
-- **Git Protection**: `.env` is permanently added to `.gitignore`. A sanitized `.env.example` is committed with placeholder values.
-- **Key Separation**: Razorpay Test Keys (`rzp_test_...`) and Production Keys (`rzp_live_...`) are isolated across development and production environments.
-- **AWS Credentials**: Production EC2 instance uses AWS IAM Instance Roles whenever possible rather than static access keys hardcoded into configuration files.
+## 3. Rate Limiting Configuration Registry (`backend/src/middlewares/rateLimiter.middleware.js`)
+
+```javascript
+// Global API Limiter: 100 req / 15 min (prod), 1000 req / 15 min (dev)
+const apiRateLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: isDev ? 1000 : 100 });
+
+// Auth Limiter (Login, Registration): 10 req / 15 min
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: "Too many authentication attempts..." });
+
+// OTP Limiter (Verification, Resend, Reset): 5 req / 15 min
+const otpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: "Too many OTP requests..." });
+```
+
+---
+
+## 4. Environment & Secret Governance
+- **Git Protection**: `.env` is permanently ignored via `.gitignore`. `.env.example` documents required environment keys with safe placeholders.
+- **Session Secrets**: `SESSION_SECRET` requires a minimum 32-character high-entropy string in production.
+- **Fail-Fast Configuration**: `backend/src/config/environment.js` validates all critical environment variables on startup, terminating immediately with an informative error if variables are missing.

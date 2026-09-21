@@ -10,20 +10,23 @@ All API endpoints follow strict REST conventions and are versioned under `/api/v
 ### 2.1 Authentication (`/api/v1/auth`)
 | Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/register` | Register new customer & send OTP | No | Public | `{ name, email, password, phone }` | 201, 400, 409 |
-| `POST` | `/verify-otp` | Verify email OTP & establish session | No | Public | `{ email, otp }` | 200, 400, 404 |
-| `POST` | `/resend-otp` | Re-dispatch fresh 6-digit OTP | No | Public | `{ email, purpose }` | 200, 429 |
-| `POST` | `/login` | Authenticate customer & set session cookie | No | Public | `{ email, password }` | 200, 400, 401, 403 |
-| `POST` | `/logout` | Destroy session & clear cookie | Yes | User/Admin | None | 200, 401 |
-| `POST` | `/forgot-password` | Request password reset OTP | No | Public | `{ email }` | 200, 404 |
-| `POST` | `/reset-password` | Reset password using OTP | No | Public | `{ email, otp, newPassword }` | 200, 400 |
+| `POST` | `/register` | Register new customer & dispatch 6-digit OTP | No | Public | `{ name, email, password, phone? }` | 201, 409, 422 |
+| `POST` | `/verify-registration-otp` | Verify OTP, mark `isVerified: true`, create session | No | Public | `{ email, otp }` | 200, 400, 404 |
+| `POST` | `/resend-registration-otp` | Invalidate prior OTPs & dispatch fresh 6-digit OTP | No | Public | `{ email }` | 200, 400, 404 |
+| `POST` | `/login` | Authenticate credentials & set `connect.sid` cookie | No | Public | `{ email, password }` | 200, 401, 403, 422 |
+| `POST` | `/logout` | Destroy server session & clear cookie | Yes | User/Admin | None | 200, 401 |
+| `GET` | `/me` | Get current authenticated user profile | Yes | User/Admin | None | 200, 401 |
+| `POST` | `/forgot-password` | Request password reset OTP (uniform response) | No | Public | `{ email }` | 200, 422 |
+| `POST` | `/reset-password` | Reset password using 6-digit OTP | No | Public | `{ email, otp, newPassword }` | 200, 400, 422 |
+| `PUT` | `/change-password` | Update account password when authenticated | Yes | User/Admin | `{ currentPassword, newPassword }` | 200, 400, 401, 422 |
+| `POST` | `/request-email-change` | Send verification OTP to requested new email | Yes | User/Admin | `{ newEmail }` | 200, 400, 409, 422 |
+| `POST` | `/verify-email-change` | Verify OTP and atomically update user email | Yes | User/Admin | `{ newEmail, otp }` | 200, 400, 422 |
 
-### 2.2 Customer Account & Addresses (`/api/v1/users`)
+### 2.2 Customer Account & Profile (`/api/v1/users`)
 | Method | Endpoint | Purpose | Auth | Role | Request Body / Params | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/profile` | Get current user profile | Yes | User/Admin | None | 200, 401 |
-| `PATCH` | `/profile` | Update profile info (name, phone) | Yes | User | `{ name, phone }` | 200, 400 |
-| `PATCH` | `/change-password` | Update account password | Yes | User | `{ oldPassword, newPassword }` | 200, 400, 401 |
+| `GET` | `/profile` | Get current user profile (scoped to session) | Yes | User/Admin | None | 200, 401 |
+| `PUT` | `/profile` | Update profile info (name, phone) | Yes | User/Admin | `{ name?, phone? }` | 200, 400, 401, 422 |
 | `GET` | `/addresses` | List all saved addresses | Yes | User | None | 200, 401 |
 | `POST` | `/addresses` | Add new shipping address | Yes | User | `{ fullName, phone, street, city, state, pincode, isDefault }` | 201, 400 |
 | `PATCH` | `/addresses/:id` | Edit existing address | Yes | User | Partial address fields | 200, 400, 404 |

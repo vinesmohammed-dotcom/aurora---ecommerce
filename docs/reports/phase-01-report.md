@@ -142,3 +142,41 @@ sequenceDiagram
 - **Simple Analogy**: A mystery shopper who visits your restaurant, orders a meal from the waiter, and checks if the meal was cooked properly and billed accurately according to the menu.
 - **Technical Explanation**: Supertest takes an Express `app` instance, simulates incoming HTTP requests in-memory via Node's low-level stream pipeline, and returns status codes, headers, and body payloads for assertion without needing to run a live browser.
 - **Where it appears**: `backend/tests/health.test.js`.
+
+---
+
+## 4. Verified Dependency Versions (Post-Review Update)
+
+Following the Phase 1 final review, dependencies were audited and upgraded to modern, supported stable versions without breaking architectural stability:
+
+| Package | Version | Layer | Justification |
+| :--- | :--- | :--- | :--- |
+| `express` | `^5.2.1` | Backend Core | Modern Express 5 line providing native Promise handling in route handlers and updated HTTP standards. |
+| `morgan` | `^1.12.1` | Logging | Stable HTTP request logger for development and production telemetry. |
+| `bcryptjs` | `^3.0.3` | Security | Pure JavaScript implementation of bcrypt password hashing, avoiding native C++ build toolchain dependencies on Windows while delivering secure 12 salt rounds. |
+| `mongoose` | `^8.9.5` | Persistence | Modern Mongoose 8 ODM with native schema validations and connection management. |
+| `express-session` | `^1.18.1` | Session | Secure session middleware for stateful authentication. |
+| `connect-mongo` | `^5.1.0` | Session Store | MongoDB session persistence adapter. |
+| `vitest` | `^3.2.7` | Backend Test | High-speed ESM-native test runner. |
+| `supertest` | `^7.0.0` | Backend Test | HTTP assertion library for testing Express apps without binding ports. |
+| `react` | `^18.3.1` | Frontend Core | Industry standard reactive UI component library. |
+| `react-dom` | `^18.3.1` | Frontend DOM | DOM renderer for React. |
+| `vite` | `^6.0.7` | Frontend Tooling | High-performance frontend build tool and dev server. |
+| `tailwindcss` | `^3.4.17` | Frontend Styling | Utility-first CSS framework for atomic design tokens. |
+| `@reduxjs/toolkit` | `^2.5.0` | Frontend State | Modern opinionated Redux state management. |
+
+---
+
+## 5. Dual-Probe Health Architecture: Liveness vs Readiness
+
+In cloud environments (such as AWS ECS, EKS, or EC2 Application Load Balancers), a single health endpoint is insufficient. Phase 1 separates health monitoring into two distinct probes:
+
+1. **Liveness Probe (`GET /api/v1/health`)**:
+   - **Purpose**: Verifies whether the Node.js process is alive, the event loop is spinning, and the HTTP listener is accepting sockets.
+   - **Response**: Always returns HTTP 200 with uptime, timestamp, and PID as long as the Express process is active.
+   - **Cloud Orchestrator Action**: If this fails, the orchestrator restarts the container or process.
+
+2. **Readiness Probe (`GET /api/v1/health/ready`)**:
+   - **Purpose**: Verifies whether the application has successfully connected to all backing dependencies (MongoDB) and is ready to process customer traffic.
+   - **Response**: Returns HTTP 200 if `mongoose.connection.readyState === 1` (`connected`), or HTTP 503 Service Unavailable with `database: "disconnected"` if the database is unreachable.
+   - **Cloud Orchestrator Action**: If this fails, the load balancer temporarily stops routing customer traffic to this instance while keeping the process alive to attempt reconnection.

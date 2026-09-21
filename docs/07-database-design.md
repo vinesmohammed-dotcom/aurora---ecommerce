@@ -22,33 +22,40 @@ In MongoDB, a foundational design decision is choosing between **referencing** (
 
 ## 2. Collection Schemas
 
-### 2.1 User Collection
+### 2.1 User Collection (`backend/src/modules/users/user.model.js`)
 - **Purpose**: Stores customer and administrative credentials, profile information, and account status.
 - **Fields**:
   - `_id`: `ObjectId`, required (Primary Key).
   - `name`: `String`, required, trimmed, min 2, max 50 chars.
   - `email`: `String`, required, unique, lowercase, trimmed, valid email format.
-  - `password`: `String`, required, hashed with `bcryptjs` (min 60 chars).
-  - `phone`: `String`, optional, regex validated (10 digits).
-  - `role`: `String`, required, enum: `['USER', 'ADMIN']`, default: `'USER'`.
-  - `isVerified`: `Boolean`, default: `false` (set to `true` upon successful OTP entry).
-  - `isBlocked`: `Boolean`, default: `false` (admin can toggle to ban malicious users).
+  - `passwordHash`: `String`, required, select: false (hashed using `bcryptjs` with 12 salt rounds).
+  - `phone`: `String`, optional, trimmed.
+  - `role`: `String`, required, enum: `['USER', 'ADMIN']`, default: `'USER'`, indexed.
+  - `isVerified`: `Boolean`, default: `false` (set to `true` upon successful registration OTP entry).
+  - `isBlocked`: `Boolean`, default: `false` (admin can toggle to suspend malicious accounts).
   - `createdAt`, `updatedAt`: `Date`, timestamps.
+- **Methods**:
+  - `comparePassword(candidatePassword)`: Compares candidate plaintext with `passwordHash` via `bcrypt.compare`.
+  - `toJSON()`: Explicitly deletes `passwordHash` and `__v` before returning serialized JSON to clients.
 - **Indexes**:
-  - Unique index: `{ email: 1 }`
+  - Unique index: `{ email: 1 }` (enforced via `unique: true`)
   - Index: `{ role: 1 }`
 
-### 2.2 OTP Collection
-- **Purpose**: Stores time-sensitive, one-time passwords for email verification and password resets.
+### 2.2 OTP Collection (`backend/src/modules/auth/otp.model.js`)
+- **Purpose**: Stores time-sensitive, one-time passwords for registration verification, password resets, and email changes.
 - **Fields**:
   - `_id`: `ObjectId`, required.
   - `email`: `String`, required, lowercase, trimmed.
-  - `otp`: `String`, required (6-digit cryptographically secure string, hashed with SHA-256).
-  - `purpose`: `String`, required, enum: `['VERIFY_EMAIL', 'RESET_PASSWORD', 'CHANGE_EMAIL']`.
-  - `createdAt`: `Date`, default: `Date.now`, **TTL index expires after 300 seconds (5 minutes)**.
+  - `hashedOtp`: `String`, required (SHA-256 digest of the 6-digit code; plaintext is never stored).
+  - `purpose`: `String`, required, enum: `['REGISTRATION', 'PASSWORD_RESET', 'EMAIL_CHANGE']`.
+  - `expiresAt`: `Date`, required, 5-minute TTL from creation.
+  - `attempts`: `Number`, default: `0` (tracks failed verification attempts).
+  - `maxAttempts`: `Number`, default: `5` (locks token after 5 failed guesses).
+  - `isUsed`: `Boolean`, default: `false` (prevents replay/reuse attacks).
+  - `createdAt`, `updatedAt`: `Date`, timestamps.
 - **Indexes**:
-  - TTL Index: `{ createdAt: 1 }, { expireAfterSeconds: 300 }`
-  - Compound Index: `{ email: 1, purpose: 1 }`
+  - TTL Index: `{ expiresAt: 1 }, { expireAfterSeconds: 0 }` (MongoDB auto-deletes expired records).
+  - Compound Index: `{ email: 1, purpose: 1 }` (accelerates looking up active verification tokens).
 
 ### 2.3 Category Collection
 - **Purpose**: High-level classification of catalog products (e.g. Footwear, Apparel, Electronics).

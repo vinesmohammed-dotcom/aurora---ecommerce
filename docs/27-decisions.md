@@ -81,3 +81,49 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 - **Why appropriate**: Standard industry practice for clean testability; allows importing `app` directly into Vitest/Supertest without booting live databases or HTTP servers.
 - **Simpler alternative**: Single `server.js` containing both `app` creation and `app.listen()`.
 - **Why alternative rejected**: Breaks automated integration testing and makes graceful shutdown management coupled to routing.
+
+### ADR-11: Upgrade to Express 5 for Native Async Handling
+- **Why we need it**: Modern Node.js standard for building robust web servers.
+- **Problem it solves**: Express 4 required wrapping every asynchronous controller handler in custom try/catch blocks or helper functions like `asyncHandler(fn)` to prevent unhandled promise rejections from crashing the process.
+- **Why appropriate**: Express 5 natively handles rejected promises in route handlers, passing them automatically to the global error middleware. It also aligns with current Node 20+ LTS runtimes.
+- **Simpler alternative**: Remaining on Express 4.x.
+- **Why alternative rejected**: Express 4 is legacy software. Starting a new commercial portfolio project in 2026 on Express 4 creates immediate technical debt.
+
+### ADR-12: `bcryptjs` with 12 Salt Rounds for Password Hashing
+- **Why we need it**: Irreversible cryptographic hashing of user passwords before persistence in MongoDB.
+- **Problem it solves**: Plaintext or weakly hashed (MD5/SHA1) passwords lead to catastrophic credential exposure if the database is dumped.
+- **Why appropriate**: `bcryptjs` is written in pure JavaScript, eliminating Python and C++ compilation toolchain requirements on Windows development machines while providing identical security output. Cost factor 12 provides strong defense against GPU-accelerated brute-force attacks (~250ms hashing time) while maintaining responsive UX.
+- **Simpler alternative**: Native `crypto.pbkdf2` or `bcrypt` (C++ bindings).
+- **Why alternative rejected**: Native `bcrypt` requires node-gyp and native build tools on developer machines which frequently break across OS platforms. `bcryptjs` guarantees frictionless cross-platform portability.
+
+### ADR-13: SHA-256 Hashed OTPs with MongoDB TTL Index
+- **Why we need it**: Ephemeral verification tokens for user registration, password resets, and email changes.
+- **Problem it solves**: Plaintext OTPs stored in the database allow database administrators or compromised read replicas to read live verification tokens. Leaving expired OTPs in the database causes unbounded growth.
+- **Why appropriate**: Fast SHA-256 one-way hashing hides OTP values at rest. Comparing OTPs with `crypto.timingSafeEqual` prevents side-channel timing attacks. A MongoDB TTL index (`{ expiresAt: 1 }, { expireAfterSeconds: 0 }`) guarantees that the database engine automatically purges expired tokens without requiring external cron daemons.
+- **Simpler alternative**: Plaintext OTP in the `users` document with an `otpExpires` timestamp.
+- **Why alternative rejected**: Plaintext storage in the user document creates security leakage risks, pollutes the primary user schema, and requires manual database query filters to exclude expired tokens.
+
+### ADR-14: Repository Layer Usage Boundary
+- **Why we need it**: Clear separation of persistence logic while avoiding redundant, anemic abstraction layers.
+- **Problem it solves**: Dogmatic implementations of the Repository Pattern often create empty "pass-through" wrapper classes that merely call `Model.findById(id)` without adding query logic, adding boilerplate without benefit.
+- **Why appropriate**: We establish a strict architectural boundary: controllers delegate to services. Services interact with Mongoose models directly for standard CRUD operations. Separate repository modules are introduced **only** when complex query encapsulation, multi-collection aggregation pipelines, or data-source swapping is genuinely required.
+- **Simpler alternative**: Creating strict Repository wrappers for every single Mongoose model.
+- **Why alternative rejected**: Violates the "Do not over-engineer" principle. Mongoose `Model` is already an Active Record / Repository pattern implementation. Adding pure pass-through wrappers introduces maintenance overhead with zero operational benefit.
+
+---
+
+## 3. Verified Dependency Versions Audit
+
+| Package | Version | Justification |
+| :--- | :--- | :--- |
+| `express` | `^5.2.1` | Express 5 stable line with native async rejection handling. |
+| `morgan` | `^1.12.1` | HTTP access logging. |
+| `bcryptjs` | `^3.0.3` | Pure JS bcrypt password hashing with 12 salt rounds. |
+| `mongoose` | `^8.9.5` | Mongoose 8 schema modeling and MongoDB driver. |
+| `express-session` | `^1.18.1` | Stateful session management. |
+| `connect-mongo` | `^5.1.0` | MongoDB session store adapter. |
+| `zod` | `^3.24.1` | Type-safe runtime schema validation. |
+| `vitest` | `^3.2.7` | High performance unit/integration test runner. |
+| `supertest` | `^7.0.0` | In-memory HTTP endpoint testing. |
+| `react` | `^18.3.1` | Stable React 18 production release. |
+| `vite` | `^6.0.7` | Vite 6 build toolchain. |

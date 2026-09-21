@@ -14,7 +14,7 @@ Therefore, this project strictly defines indexes that match our high-frequency q
 | Collection | Indexed Fields | Index Type | Target Query Pattern | Performance Benefit & Trade-Off |
 | :--- | :--- | :--- | :--- | :--- |
 | **`users`** | `{ email: 1 }` | Unique | Customer login, registration check (`findOne({ email })`) | **Essential**. Enforces uniqueness at the database engine level; instant $O(\log N)$ lookup. Zero read trade-off; tiny write penalty on signup. |
-| **`otps`** | `{ createdAt: 1 }` | TTL Index (`expireAfterSeconds: 300`) | Automatic purging of expired OTPs | **Essential**. MongoDB background thread removes expired OTPs automatically every 60 seconds without cron scripts or scheduled workers. |
+| **`otps`** | `{ expiresAt: 1 }` | TTL Index (`expireAfterSeconds: 0`) | Automatic purging of expired OTPs | **Essential**. MongoDB background thread removes expired OTPs automatically every 60 seconds without cron scripts or scheduled workers. |
 | **`otps`** | `{ email: 1, purpose: 1 }` | Compound | Fetching active OTP on verify submission | Prevents scanning unrelated OTP records. Clean compound index matching verification filter. |
 | **`products`** | `{ slug: 1 }` | Unique | Product detail page lookup (`/product/:slug`) | Guarantees human-friendly URL uniqueness. Instant single-document retrieval. |
 | **`products`** | `{ "variants.sku": 1 }` | Unique Sparse | Variant inventory updates and warehouse SKU lookups | Guarantees SKU uniqueness across all embedded variant items across the catalog. Sparse flag saves memory. |
