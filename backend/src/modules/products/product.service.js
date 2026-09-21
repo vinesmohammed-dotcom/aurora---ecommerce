@@ -25,12 +25,13 @@ class ProductService {
   } = {}) {
     const query = { isActive: true };
 
-    // 1. Text Search across name and description
+    // 1. Text Search across name, description, and tags
     if (search && search.trim()) {
       const trimmedSearch = search.trim();
       query.$or = [
         { name: { $regex: trimmedSearch, $options: "i" } },
-        { description: { $regex: trimmedSearch, $options: "i" } }
+        { description: { $regex: trimmedSearch, $options: "i" } },
+        { tags: { $regex: trimmedSearch, $options: "i" } }
       ];
     }
 
@@ -331,7 +332,7 @@ class ProductService {
     }
 
     // 6. Generate Slug if not provided
-    const normalizedName = productData.name.trim();
+    const normalizedName = (productData.name || productData.title || "").trim();
     const generatedSlug = productData.slug
       ? productData.slug.trim().toLowerCase()
       : normalizedName
@@ -354,6 +355,7 @@ class ProductService {
       ...productData,
       name: normalizedName,
       slug: generatedSlug,
+      tags: Array.isArray(productData.tags) ? productData.tags.map((t) => t.trim().toLowerCase()) : [],
       variants: productData.variants.map((v) => ({
         ...v,
         sku: v.sku.trim().toUpperCase()
@@ -424,9 +426,10 @@ class ProductService {
       product.isActive = false;
     }
 
-    if (updateData.name) product.name = updateData.name.trim();
+    if (updateData.name || updateData.title) product.name = (updateData.name || updateData.title).trim();
     if (updateData.description) product.description = updateData.description.trim();
     if (updateData.images) product.images = updateData.images;
+    if (Array.isArray(updateData.tags)) product.tags = updateData.tags.map((t) => t.trim().toLowerCase());
 
     return product.save();
   }
@@ -463,9 +466,23 @@ class ProductService {
       throw new AppError("Variant not found in this product.", HTTP_CODES.NOT_FOUND, ERROR_CODES.NOT_FOUND);
     }
 
-    // If SKU is being modified, ensure uniqueness across entire catalog
+    // If SKU is being modified, ensure uniqueness both within the same product AND across entire catalog
     if (variantUpdate.sku && variantUpdate.sku.trim().toUpperCase() !== variant.sku) {
       const upperSku = variantUpdate.sku.trim().toUpperCase();
+
+      // 1. Application-level check: Check within the SAME product (other variants)
+      const duplicateWithinProduct = product.variants.some(
+        (v) => v._id.toString() !== variantId.toString() && v.sku === upperSku
+      );
+      if (duplicateWithinProduct) {
+        throw new AppError(
+          `Duplicate SKU '${upperSku}' within the same product.`,
+          HTTP_CODES.CONFLICT,
+          ERROR_CODES.DUPLICATE_FIELD
+        );
+      }
+
+      // 2. Database/catalog check: Check across other products in catalog
       const duplicateProduct = await Product.findOne({
         _id: { $ne: productId },
         "variants.sku": upperSku
@@ -503,7 +520,17 @@ class ProductService {
     const product = await this.getAdminProductById(productId);
     const upperSku = variantData.sku.trim().toUpperCase();
 
-    // Check SKU uniqueness
+    // 1. Application-level check: Check within the SAME product
+    const duplicateWithinProduct = product.variants.some((v) => v.sku === upperSku);
+    if (duplicateWithinProduct) {
+      throw new AppError(
+        `Duplicate SKU '${upperSku}' within the same product.`,
+        HTTP_CODES.CONFLICT,
+        ERROR_CODES.DUPLICATE_FIELD
+      );
+    }
+
+    // 2. Database/catalog check: Check across other products in catalog
     const existing = await Product.findOne({ "variants.sku": upperSku });
     if (existing) {
       throw new AppError(

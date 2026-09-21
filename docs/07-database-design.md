@@ -93,20 +93,19 @@ In MongoDB, a foundational design decision is choosing between **referencing** (
 - **Purpose**: Complete catalog product definition, media assets, and embedded variant stock matrices.
 - **Fields**:
   - `_id`: `ObjectId`, required.
-  - `title`: `String`, required, trimmed, min 3, max 120 chars (with virtual `name` getter/setter for dual compatibility).
+  - `name`: `String`, required, trimmed, min 2, max 120 chars (standardized model field, with virtual `title` getter/setter for backwards compatibility).
   - `slug`: `String`, required, unique, lowercase, trimmed.
   - `description`: `String`, required, min 10 chars, max 2000 chars.
   - `category`: `ObjectId`, ref: `'Category'`, required, indexed.
   - `brand`: `ObjectId`, ref: `'Brand'`, required, indexed.
-  - `images`: `[String]`, array of AWS S3 image URLs (min 1, max 6).
+  - `images`: `[String]`, array of image URLs (min 1, max 6).
   - `tags`: `[String]`, array of lowercase search tags.
   - `basePrice`: `Number`, required, min 0 (automatically computed from lowest active variant price).
   - `isActive`: `Boolean`, default: `true`, indexed.
   - `isFeatured`: `Boolean`, default: `false`.
   - `variants`: Array of Subdocuments (`variantSchema`, min 1 required):
     - `_id`: `ObjectId`, required (Variant ID).
-    - `sku`: `String`, required, unique across platform (sparse unique index), uppercase.
-    - `title`: `String`, required, trimmed (e.g. "Size 10 - Navy Blue").
+    - `sku`: `String`, required, uppercase, trimmed (dual uniqueness protection: sparse unique index across products + application-level validation within product).
     - `attributes`: `Map of String` (e.g. `color: "Navy", size: "10"`).
     - `price`: `Number`, required, min 1 (customer retail selling price).
     - `costPrice`: `Number`, required, min 0 (merchant wholesale cost price; **strictly excluded from customer endpoints via `select('-variants.costPrice')`**).
@@ -118,45 +117,53 @@ In MongoDB, a foundational design decision is choosing between **referencing** (
   - Compound Index (Category ESR): `{ category: 1, isActive: 1, basePrice: 1 }`
   - Compound Index (Brand ESR): `{ brand: 1, isActive: 1, basePrice: 1 }`
   - Unique Sparse Index: `{ "variants.sku": 1 }, { unique: true, sparse: true }`
-  - Text Index: `{ title: "text", description: "text", tags: "text" }`
+  - Text Index: `{ name: "text", description: "text", tags: "text" }`
 - **Data Protection Guarantee**: Public endpoints (`GET /api/v1/products` and `GET /api/v1/products/:slug`) strictly project away `costPrice` using `.select('-variants.costPrice')`. Admin endpoints (`GET /api/v1/admin/products/:id`) provide full margin transparency to authorized administrators.
 
-### 2.6 Cart Collection
+### 2.6 Cart Collection (`backend/src/modules/cart/cart.model.js`)
 - **Purpose**: Persistent shopping cart for authenticated users.
 - **Fields**:
   - `_id`: `ObjectId`, required.
-  - `user`: `ObjectId`, ref: `'User'`, required, unique (one active cart per user).
-  - `items`: Array of Subdocuments:
-    - `product`: `ObjectId`, ref: `'Product'`, required.
+  - `userId`: `ObjectId`, ref: `'User'`, required, unique (one active cart document per customer).
+  - `items`: Array of Subdocuments (`cartItemSchema`):
+    - `productId`: `ObjectId`, ref: `'Product'`, required.
     - `variantId`: `ObjectId`, required.
-    - `quantity`: `Number`, required, min 1, max 5 (per-item limit).
-  - `createdAt`, `updatedAt`: `Date`.
-- **Note**: Cart prices are **never** stored in the database. When the cart is queried, prices and stock are populated on the fly from the current `Product` document.
-
-### 2.7 Wishlist Collection
-- **Purpose**: Saved items for authenticated users.
-- **Fields**:
-  - `_id`: `ObjectId`, required.
-  - `user`: `ObjectId`, ref: `'User'`, required, unique.
-  - `products`: `[{ type: ObjectId, ref: 'Product' }]`.
-  - `createdAt`, `updatedAt`: `Date`.
-
-### 2.8 Address Collection
-- **Purpose**: Multi-line shipping destinations linked to customer profiles.
-- **Fields**:
-  - `_id`: `ObjectId`, required.
-  - `user`: `ObjectId`, ref: `'User'`, required.
-  - `fullName`: `String`, required, trimmed.
-  - `phone`: `String`, required (10 digits).
-  - `street`: `String`, required.
-  - `city`: `String`, required.
-  - `state`: `String`, required.
-  - `pincode`: `String`, required (6 digits).
-  - `landmark`: `String`, optional.
-  - `addressType`: `String`, enum: `['HOME', 'WORK', 'OTHER']`, default: `'HOME'`.
-  - `isDefault`: `Boolean`, default: `false`.
+    - `quantity`: `Number`, required, min 1, max 10 (strict per-item limit).
+  - `createdAt`, `updatedAt`: `Date`, timestamps.
+- **Dynamic Pricing Architectural Principle**: Cart prices, item subtotals, and overall order totals are **never** stored statically in the database. When a customer retrieves their cart, prices, variant attributes, active statuses, and stock levels are dynamically populated directly from current `Product` variants. This prevents client price tampering and guarantees stale inventory drift detection.
 - **Indexes**:
-  - Index: `{ user: 1, isDefault: 1 }`
+  - Unique Index: `{ userId: 1 }`
+
+### 2.7 Wishlist Collection (`backend/src/modules/wishlist/wishlist.model.js`)
+- **Purpose**: Saved customer favorite items for tracking and fast future checkout.
+- **Fields**:
+  - `_id`: `ObjectId`, required.
+  - `userId`: `ObjectId`, ref: `'User'`, required, unique (one wishlist per customer).
+  - `items`: `[{ type: ObjectId, ref: 'Product' }]` (set uniqueness enforced via MongoDB `$addToSet`).
+  - `createdAt`, `updatedAt`: `Date`, timestamps.
+- **Indexes**:
+  - Unique Index: `{ userId: 1 }`
+
+### 2.8 Address Collection (`backend/src/modules/addresses/address.model.js`)
+- **Purpose**: Multi-line shipping destinations linked strictly to authenticated customer profiles.
+- **Fields**:
+  - `_id`: `ObjectId`, required.
+  - `userId`: `ObjectId`, ref: `'User'`, required, indexed.
+  - `fullName`: `String`, required, trimmed, min 2, max 100 chars.
+  - `phone`: `String`, required, trimmed, 10 to 15 digits/symbols.
+  - `addressLine1`: `String`, required, trimmed, min 3, max 200 chars.
+  - `addressLine2`: `String`, trimmed, optional, default: `""`.
+  - `city`: `String`, required, trimmed, min 2, max 100 chars.
+  - `state`: `String`, required, trimmed, min 2, max 100 chars.
+  - `postalCode`: `String`, required, trimmed, min 3, max 20 chars.
+  - `country`: `String`, required, trimmed, default: `"India"`.
+  - `label`: `String`, required, enum: `['HOME', 'WORK', 'OTHER']`, default: `'HOME'`.
+  - `isDefault`: `Boolean`, default: `false`.
+  - `createdAt`, `updatedAt`: `Date`, timestamps.
+- **Indexes**:
+  - Compound Index: `{ userId: 1, isDefault: -1 }` (optimizes default address lookup and list ordering).
+- **Single Default Rule**: When an address is created or flagged as default, all other addresses belonging to `userId` have `isDefault` atomically reset to `false`. When a default address is deleted, the customer's most recently updated remaining address is automatically promoted to default.
+- **Anti-IDOR Security**: All address operations filter strictly by `{ _id, userId: req.user._id }`. Queries attempting to access other users' addresses return `404 NOT_FOUND` rather than `403 FORBIDDEN` to prevent ID enumeration.
 
 ### 2.9 Coupon Collection
 - **Purpose**: Admin-created promotional codes applied at checkout.

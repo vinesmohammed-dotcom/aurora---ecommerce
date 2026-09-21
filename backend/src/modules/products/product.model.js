@@ -85,6 +85,10 @@ const productSchema = new mongoose.Schema(
       type: [String],
       default: []
     },
+    tags: {
+      type: [String],
+      default: []
+    },
     basePrice: {
       type: Number,
       default: 0,
@@ -100,15 +104,27 @@ const productSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
   }
 );
+
+// Virtual for title <=> name compatibility
+productSchema
+  .virtual("title")
+  .get(function () {
+    return this.name;
+  })
+  .set(function (val) {
+    this.name = val;
+  });
 
 // Indexes
 productSchema.index({ "variants.sku": 1 }, { unique: true, sparse: true });
 productSchema.index({ category: 1, isActive: 1, basePrice: 1 });
 productSchema.index({ brand: 1, isActive: 1, basePrice: 1 });
-productSchema.index({ name: "text", description: "text" });
+productSchema.index({ name: "text", description: "text", tags: "text" });
 
 /**
  * Pre-validate hook: auto-compute basePrice from lowest active variant price

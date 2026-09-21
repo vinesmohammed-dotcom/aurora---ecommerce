@@ -161,6 +161,7 @@ export default function AdminProductsPage() {
       if (editingProduct) {
         // Update product metadata
         const payload = {
+          name: productForm.title,
           title: productForm.title,
           description: productForm.description,
           category: productForm.category,
@@ -177,6 +178,7 @@ export default function AdminProductsPage() {
       } else {
         // Create new product with required initial variant
         const payload = {
+          name: productForm.title,
           title: productForm.title,
           description: productForm.description,
           category: productForm.category,

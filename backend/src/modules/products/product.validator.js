@@ -25,10 +25,17 @@ const variantInputSchema = z.object({
 
 const createProductSchema = z.object({
   name: z
-    .string({ required_error: "Product name is required" })
+    .string()
     .trim()
     .min(2, "Product name must be at least 2 characters")
-    .max(120, "Product name cannot exceed 120 characters"),
+    .max(120, "Product name cannot exceed 120 characters")
+    .optional(),
+  title: z
+    .string()
+    .trim()
+    .min(2, "Product title must be at least 2 characters")
+    .max(120, "Product title cannot exceed 120 characters")
+    .optional(),
   slug: z
     .string()
     .trim()
@@ -46,14 +53,19 @@ const createProductSchema = z.object({
     .string({ required_error: "Category ID is required" })
     .regex(objectIdRegex, "Category ID must be a valid 24-character hex ObjectId"),
   images: z.array(z.string().trim()).optional().default([]),
+  tags: z.array(z.string().trim()).optional().default([]),
   isActive: z.boolean().optional().default(false),
   variants: z
     .array(variantInputSchema)
     .min(1, "Product must have at least one variant before creation")
+}).refine((data) => data.name || data.title, {
+  message: "Product name is required",
+  path: ["name"]
 });
 
 const updateProductSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
+  title: z.string().trim().min(2).max(120).optional(),
   slug: z
     .string()
     .trim()
@@ -64,6 +76,7 @@ const updateProductSchema = z.object({
   brand: z.string().regex(objectIdRegex, "Invalid Brand ObjectId").optional(),
   category: z.string().regex(objectIdRegex, "Invalid Category ObjectId").optional(),
   images: z.array(z.string().trim()).optional(),
+  tags: z.array(z.string().trim()).optional(),
   isActive: z.boolean().optional()
 });
 

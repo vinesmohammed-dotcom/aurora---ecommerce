@@ -12,7 +12,37 @@ Anyone can open Chrome DevTools, modify JavaScript variables, or send custom HTT
 
 ---
 
-## 2. Multi-Stage Checkout Pipeline
+## 2. Dynamic Shopping Cart Architecture (Phase 4 Foundation)
+
+### 2.1 The Principle of Ephemeral Price Representation
+In our database model, the `Cart` collection records only structural intent:
+```json
+{
+  "userId": "64f1...",
+  "items": [
+    { "productId": "64f2...", "variantId": "64f3...", "quantity": 2 }
+  ]
+}
+```
+**Why prices and subtotals are never saved to the Cart document**:
+1. **Catalog Drift Resilience**: If an administrator changes a product price from ₹9,999 to ₹8,999, the customer's cart instantly reflects the new price without data synchronization jobs.
+2. **Eliminating Price Tampering**: Because the client cannot pass a price to `POST /api/v1/cart/items`, price spoofing is physically impossible.
+3. **Stale Stock Detection**: If warehouse inventory drops below the customer's cart quantity (e.g., user added 5 units yesterday, but only 2 units remain today), the retrieval service dynamically flags `staleStock: true` and attaches a warning: `"Only 2 items currently available in warehouse"`.
+4. **Wholesale Margin Protection**: The internal wholesale `costPrice` is strictly stripped (`select('-variants.costPrice')`) so business margins are never leaked to the client.
+
+### 2.2 Strict Architectural Boundary: Phase 4 vs Phase 5
+- **Adding to Cart DOES NOT Reserve Stock**:
+  - Reserving inventory when an item is added to a cart allows malicious users to hoard stock without paying (denial of inventory attack).
+  - Therefore, during Phase 4, the cart only verifies availability when items are added or fetched.
+  - **Stock reservation is strictly deferred to Phase 5 Checkout**, where stock is decremented atomically when the order is confirmed.
+
+### 2.3 Quantity Limits & Validation Boundaries
+- **Minimum Quantity**: 1 (a quantity of 0 triggers item removal).
+- **Maximum Per-Item Limit**: 10 units per variant (enforced by Zod schema and service layer to prevent automated bulk hoarding).
+
+---
+
+## 3. Multi-Stage Checkout Pipeline (Phase 5 Architecture)
 
 ```mermaid
 flowchart TD

@@ -76,12 +76,23 @@ const requireRole = (...roles) => {
 
 ## 3. IDOR Prevention & Scoped Identity Guard
 
-**Insecure Direct Object References (IDOR)** occur when an application relies on client-supplied identifiers (such as `/api/v1/users/:id`) to retrieve or update private records.
+**Insecure Direct Object References (IDOR)** occur when an application relies on client-supplied identifiers (such as `/api/v1/addresses/:id` or `/api/v1/users/:id`) to retrieve or update private records without verifying ownership.
 
-In our architecture:
-- User profile endpoints (`GET /api/v1/users/profile`, `PUT /api/v1/users/profile`) accept **zero** user IDs in request parameters or bodies.
-- The service extracts identity strictly from `req.user._id` populated by `requireAuth`.
-- A customer cannot inspect or modify another customer's profile by manipulating URL parameters.
+### Architecture Enforcements:
+1. **Implicit Session Scoping**:
+   - Cart (`/api/v1/cart`) and Wishlist (`/api/v1/wishlist`) take zero user IDs in route parameters or request bodies.
+   - Operations strictly query `{ userId: req.user._id }`.
+2. **Explicit Compound Ownership Queries for Sub-Entities**:
+   - For entity-specific operations like addresses (`GET /api/v1/addresses/:id`, `PUT /api/v1/addresses/:id`, `DELETE /api/v1/addresses/:id`), the database query is always scoped to both `_id` AND `userId`:
+     ```javascript
+     const address = await Address.findOne({ _id: id, userId: req.user._id });
+     if (!address) {
+       throw new AppError("Address not found.", 404, "NOT_FOUND");
+     }
+     ```
+3. **The 404 vs 403 Security Strategy (Preventing Resource Enumeration)**:
+   - If User B attempts to access User A's address ID `64f1a2b3...`, returning `403 Forbidden` reveals to the attacker that the resource **actually exists** in the system (acting as an enumeration oracle).
+   - By returning `404 NOT_FOUND`, User B learns nothing about whether the ID belongs to another customer or is completely invalid. The attack surface is completely neutralized.
 
 ---
 
@@ -99,4 +110,14 @@ In our architecture:
 | `/api/v1/auth/request-email-change` | `POST` | Authenticated | `requireAuth`, `otpLimiter`, `validate(...)` |
 | `/api/v1/users/profile` | `GET` | Authenticated | `requireAuth` |
 | `/api/v1/users/profile` | `PUT` | Authenticated | `requireAuth`, `validate(updateProfileSchema)` |
+| `/api/v1/addresses` | `GET`, `POST` | Authenticated | `requireAuth`, `validate(createAddressSchema)` |
+| `/api/v1/addresses/:id` | `GET`, `PUT`, `DELETE` | Authenticated Owner | `requireAuth`, `validate(addressIdParamSchema)` |
+| `/api/v1/addresses/:id/default` | `PATCH` | Authenticated Owner | `requireAuth`, `validate(addressIdParamSchema)` |
+| `/api/v1/cart` | `GET`, `DELETE` | Authenticated | `requireAuth` |
+| `/api/v1/cart/items` | `POST` | Authenticated | `requireAuth`, `validate(addToCartSchema)` |
+| `/api/v1/cart/items/:variantId` | `PATCH`, `DELETE` | Authenticated | `requireAuth`, `validate(variantIdParamSchema)` |
+| `/api/v1/wishlist` | `GET` | Authenticated | `requireAuth` |
+| `/api/v1/wishlist/items` | `POST` | Authenticated | `requireAuth`, `validate(addToWishlistSchema)` |
+| `/api/v1/wishlist/items/:productId` | `DELETE` | Authenticated | `requireAuth`, `validate(productIdParamSchema)` |
+| `/api/v1/wishlist/toggle` | `POST` | Authenticated | `requireAuth`, `validate(addToWishlistSchema)` |
 | `/api/v1/admin/**` | ALL | Admin Only | `requireAuth`, `requireRole('ADMIN')` |

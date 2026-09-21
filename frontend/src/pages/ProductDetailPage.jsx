@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useDispatch } from "react-redux";
 import api from "../services/api";
+import { setCartItemCount } from "../store/slices/cartSlice";
 import VariantSelector from "../components/catalog/VariantSelector";
-import { Package, ShoppingBag, ArrowLeft, ShieldCheck, Truck, RotateCcw } from "lucide-react";
+import { Package, ShoppingBag, ArrowLeft, ShieldCheck, Truck, RotateCcw, Heart } from "lucide-react";
 
 export default function ProductDetailPage() {
   const { slug } = useParams();
+  const dispatch = useDispatch();
   const [product, setProduct] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [activeImage, setActiveImage] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [cartNotice, setCartNotice] = useState(false);
+  const [cartNotice, setCartNotice] = useState("");
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
+  const [isWishlistLoading, setIsWishlistLoading] = useState(false);
+  const [isWishlisted, setIsWishlisted] = useState(false);
 
   useEffect(() => {
     const fetchProductDetail = async () => {
@@ -41,9 +47,40 @@ export default function ProductDetailPage() {
     }
   }, [slug]);
 
-  const handleAddToCart = () => {
-    setCartNotice(true);
-    setTimeout(() => setCartNotice(false), 4000);
+  const handleAddToCart = async () => {
+    if (!selectedVariant) return;
+    try {
+      setIsAddingToCart(true);
+      const res = await api.post("/cart/items", {
+        productId: product._id,
+        variantId: selectedVariant._id,
+        quantity: 1
+      });
+      if (res.success && res.data?.cart) {
+        dispatch(setCartItemCount(res.data.cart.totalItems || 0));
+        setCartNotice(`Added ${product.name} to cart!`);
+      }
+    } catch (err) {
+      alert(err.message || "Failed to add item to cart.");
+    } finally {
+      setIsAddingToCart(false);
+      setTimeout(() => setCartNotice(""), 3500);
+    }
+  };
+
+  const handleToggleWishlist = async () => {
+    if (!product) return;
+    try {
+      setIsWishlistLoading(true);
+      const res = await api.post("/wishlist/toggle", { productId: product._id });
+      if (res.success) {
+        setIsWishlisted((prev) => !prev);
+      }
+    } catch (err) {
+      alert(err.message || "Please log in to manage your wishlist.");
+    } finally {
+      setIsWishlistLoading(false);
+    }
   };
 
   if (isLoading) {
@@ -149,25 +186,41 @@ export default function ProductDetailPage() {
             onSelectVariant={(v) => setSelectedVariant(v)}
           />
 
-          {/* Action Button */}
+          {/* Action Buttons */}
           <div className="space-y-3 pt-2">
-            <button
-              type="button"
-              disabled={isOutOfStock}
-              onClick={handleAddToCart}
-              className={`flex w-full items-center justify-center gap-2 rounded-xl py-4 px-6 text-sm font-bold shadow-md transition-all ${
-                isOutOfStock
-                  ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
-                  : "bg-slate-900 text-white hover:bg-indigo-600 cursor-pointer"
-              }`}
-            >
-              <ShoppingBag className="h-5 w-5" />
-              <span>{isOutOfStock ? "Out of Stock" : "Add to Cart"}</span>
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={isOutOfStock || isAddingToCart}
+                onClick={handleAddToCart}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-4 px-6 text-sm font-bold shadow-md transition-all ${
+                  isOutOfStock
+                    ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+                    : "bg-slate-900 text-white hover:bg-indigo-600 cursor-pointer"
+                }`}
+              >
+                <ShoppingBag className="h-5 w-5" />
+                <span>{isAddingToCart ? "Adding..." : isOutOfStock ? "Out of Stock" : "Add to Cart"}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isWishlistLoading}
+                onClick={handleToggleWishlist}
+                title="Save to Wishlist"
+                className={`flex h-[52px] w-[52px] items-center justify-center rounded-xl border transition-all ${
+                  isWishlisted
+                    ? "border-rose-300 bg-rose-50 text-rose-600"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-rose-300 hover:text-rose-600"
+                }`}
+              >
+                <Heart className={`h-5 w-5 ${isWishlisted ? "fill-rose-500 text-rose-500" : ""}`} />
+              </button>
+            </div>
 
             {cartNotice && (
-              <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center text-xs font-medium text-indigo-900 animate-fade-in">
-                Item selected ({selectedVariant?.sku}). Shopping Cart & Checkout will activate in Phase 4!
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-xs font-semibold text-emerald-800 animate-fade-in">
+                {cartNotice}
               </div>
             )}
           </div>

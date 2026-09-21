@@ -6,8 +6,8 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
 ---
 
 ## 2. Current Status
-- **Current Phase**: **PHASE 3: Product Catalog, Categories & Search (COMPLETED & VERIFIED)**
-- **Next Phase**: **PHASE 4: Cart, Wishlist & Concurrency Safeguards**
+- **Current Phase**: **PHASE 4: Addresses, Dynamic Cart, Wishlist & Stock Concurrency (COMPLETED & VERIFIED)**
+- **Next Phase**: **PHASE 5: Multi-Stage Checkout Pipeline & Coupons**
 - **Tested Foundations**:
   - Express 5 application cleanly decoupled from HTTP server (`app.js` vs `server.js`).
   - Dual healthcheck probes: Liveness (`GET /api/v1/health`) and Readiness (`GET /api/v1/health/ready`).
@@ -18,12 +18,18 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
   - OTP model with server-secret keyed HMAC-SHA256 hash storage (`crypto.timingSafeEqual`), 5-minute MongoDB TTL index, attempt limits.
   - Complete authentication flows: registration, OTP verification, resend, login, logout, `/me`, uniform forgot password, reset password, change password, email change.
   - Product Catalog architecture: Categories, Brands, Products with embedded variants (`variants: [variantSchema]`).
+  - Standardized Product model on `name` with backwards-compatible `title` virtual getter/setter, `tags: [String]`, compound text index `{ name: "text", description: "text", tags: "text" }`.
+  - Dual-level SKU uniqueness protection: sparse unique index across products + application-level validation within product document.
   - Critical Data Protection: Public endpoints strictly project away `costPrice` via `.select('-variants.costPrice')`. Admin routes retain wholesale margin metrics.
   - Unique sparse index on `variants.sku`, compound ESR indexes on `{ category, isActive, basePrice }`, text search index.
-  - Automated integration test suite using **Vitest** and **Supertest** passing 53/53 tests across 5 test files (100%).
-  - Frontend upgraded to **React 19.3.0, Vite 6.4.3, Tailwind CSS, Redux Toolkit, and React Router**.
-  - Complete customer Shop page with URL parameter sync (`useSearchParams`), multi-facet filtering, variant selectors, and Admin management interfaces for Categories, Brands, and Products.
-  - Verified frontend production build compiling cleanly in 11.97s with zero errors.
+  - Customer Address Module: Full CRUD, single default address rule, automatic promotion upon deletion, anti-IDOR session scoping returning 404.
+  - Dynamic Shopping Cart: Live catalog-reconciled prices, client prices completely ignored, stale stock detection, quantity boundary limits (1–10).
+  - Wishlist Module: `$addToSet` set uniqueness, live product details, move-to-cart orchestration.
+  - Atomic Stock Concurrency Guard: `StockService.decrementVariantStock` with `{ stock: { $gte: qty } }` and `{ $inc: { stock: -qty } }`, verified with concurrent `Promise.all` tests.
+  - Automated integration test suite using **Vitest** and **Supertest** passing 90/90 tests across 9 test files (100%).
+  - Frontend upgraded to **React 19.3.0, Vite 8.3.0, Tailwind CSS, Redux Toolkit, and React Router**.
+  - Complete customer Shop page, Cart page, Wishlist page, Profile Address dashboard, and Admin management interfaces.
+  - Verified frontend production build compiling cleanly in 2.01s with zero errors.
 
 ---
 
@@ -35,7 +41,7 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
 | **Phase 1** | Technical Foundation & Scaffolding | **Completed** | [phase-01-report.md](file:///c:/Users/vines/react%20first%20project/docs/reports/phase-01-report.md) |
 | **Phase 2** | Customer Auth & Account Management | **Completed** | [phase-02-report.md](file:///c:/Users/vines/react%20first%20project/docs/reports/phase-02-report.md) |
 | **Phase 3** | Product Catalog, Search & Filtering | **Completed** | [phase-03-report.md](file:///c:/Users/vines/react%20first%20project/docs/reports/phase-03-report.md) |
-| **Phase 4** | Cart, Wishlist & Concurrency | *Pending* | Phase 4 Blueprint |
+| **Phase 4** | Cart, Wishlist & Concurrency | **Completed** | [phase-04-report.md](file:///c:/Users/vines/react%20first%20project/docs/reports/phase-04-report.md) |
 | **Phase 5** | Multi-Stage Checkout & Coupons | *Pending* | Phase 5 Blueprint |
 | **Phase 6** | Razorpay Payments & Webhooks | *Pending* | Phase 6 Blueprint |
 | **Phase 7** | Order Management & Invoices | *Pending* | Phase 7 Blueprint |
@@ -45,9 +51,16 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
 
 ---
 
-## 4. Phase 2 Verification Summary
-- **Backend Test Suite (`npm test`)**: Passed 25/25 tests across 2 test files in 10.11s.
-  - `tests/health.test.js`: 3 tests passed (Liveness probe, Readiness connected, Readiness disconnected 503).
-  - `tests/auth.test.js`: 22 tests passed (Registration, OTP validation, attempt limits, single-use, login, blocked/unverified guards, session cookies, logout, uniform forgot-password, reset password, change password, email change).
-- **Frontend Production Build (`npm run build`)**: Compiled successfully to `frontend/dist` in 2.76s.
-- **Git State**: Clean commit ready for Phase 2.
+## 4. Phase 4 Verification Summary
+- **Backend Test Suite (`npm test`)**: Passed 90/90 tests across 9 test files in 44.47s.
+  - `tests/health.test.js`: 3 tests passed.
+  - `tests/auth.test.js`: 22 tests passed.
+  - `tests/brand.test.js`: 5 tests passed.
+  - `tests/category.test.js`: 6 tests passed.
+  - `tests/product.test.js`: 22 tests passed.
+  - `tests/address.test.js`: 10 tests passed (CRUD, default address rules, anti-IDOR 404 security).
+  - `tests/cart.test.js`: 13 tests passed (Add, quantity limits, live price derivation, wholesale margin stripping, stale stock detection, clear cart).
+  - `tests/wishlist.test.js`: 7 tests passed ($addToSet uniqueness, availability flag, remove, toggle).
+  - `tests/concurrency.test.js`: 2 tests passed (Atomic race condition protection under concurrent requests).
+- **Frontend Production Build (`npm run build`)**: Compiled successfully to `frontend/dist` in 2.01s (Vite 8.3.0 + React 19.3.0).
+- **Git State**: Clean commit ready for Phase 5.

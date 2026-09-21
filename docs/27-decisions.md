@@ -131,6 +131,34 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 - **Simpler alternative**: Randomizing database names per test worker.
 - **Why alternative rejected**: Spawning multiple isolated databases on local development machines increases RAM consumption and startup latency for minimal gain.
 
+### ADR-18: Vite 8 Upgrade for Modern Frontend Build Toolchain
+- **Why we need it**: State-of-the-art frontend bundler and dev server compatible with React 19.
+- **Problem it solves**: Legacy Vite builds produced deprecation warnings for modern Node ESM environments (`__dirname` replacement with `import.meta.dirname`).
+- **Why appropriate**: Vite 8.3.0 provides instant HMR, ES module native handling, and compiles our production bundle in ~2 seconds.
+- **Simpler alternative**: Remaining on older Vite versions.
+- **Why alternative rejected**: Outdated bundlers carry security advisories and lack optimizations for modern React 19 hooks and transitions.
+
+### ADR-19: Dual-Level SKU Uniqueness Protection for Embedded Variants
+- **Why we need it**: Strict guarantee that no two variants in the catalog share an SKU.
+- **Problem it solves**: MongoDB unique multikey indexes on array fields (e.g. `variants.sku`) prevent duplicate values across *different* documents, but do NOT prevent duplicate values within the *same* document array.
+- **Why appropriate**: Dual-level protection: database-level unique sparse index across product documents + application-level validation checking for intra-document duplicates during product creation, variant addition, and variant modification.
+- **Simpler alternative**: Relying solely on the database multikey index.
+- **Why alternative rejected**: Fails silently when two identical SKUs are inserted into the same product's variant array.
+
+### ADR-20: Dynamic Ephemeral Pricing for Shopping Cart
+- **Why we need it**: Real-time pricing accuracy and protection against price tampering.
+- **Problem it solves**: If prices are written into the Cart document, admin price changes cause catalog drift, and malicious clients could submit modified prices.
+- **Why appropriate**: Cart documents store only structural references (`productId`, `variantId`, `quantity`). Live retail prices, stock availability, and stale inventory status are dynamically computed from catalog variants on every cart fetch.
+- **Simpler alternative**: Storing price snapshots in the cart.
+- **Why alternative rejected**: Requires complex synchronization jobs when prices change and opens vulnerabilities to client-side price tampering.
+
+### ADR-21: Anti-IDOR Authorization via Compound Session Scoping and 404 Responses
+- **Why we need it**: Complete protection against unauthorized access to user-owned resources (addresses, cart, orders).
+- **Problem it solves**: Attackers incrementing or guessing object IDs to read or alter other users' private data.
+- **Why appropriate**: Queries are always scoped to the authenticated session (`Address.findOne({ _id, userId: req.user._id })`). If not found, the API returns `404 NOT_FOUND` rather than `403 FORBIDDEN` to prevent resource enumeration.
+- **Simpler alternative**: Checking user ownership in memory after finding the document.
+- **Why alternative rejected**: In-memory checks require fetching unauthorized documents into Node memory, risk information leakage, and can expose existence oracles.
+
 ---
 
 ## 3. Verified Dependency Versions Audit
@@ -148,4 +176,5 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 | `supertest` | `^7.0.0` | In-memory HTTP endpoint testing. |
 | `react` | `^19.3.0` | Upgraded to current React 19 stable line. |
 | `react-dom` | `^19.3.0` | React 19 DOM renderer. |
-| `vite` | `^6.4.3` | Vite 6 modern build toolchain. |
+| `vite` | `^8.3.0` | Upgraded to Vite 8 modern build toolchain. |
+| `@vitejs/plugin-react` | `^6.1.1` | React 19 fast refresh plugin for Vite 8. |

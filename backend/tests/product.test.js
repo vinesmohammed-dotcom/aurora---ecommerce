@@ -93,6 +93,7 @@ describe("Phase 3 — Product Catalog & Variants (Integration Tests)", () => {
           category: activeCategoryId,
           brand: activeBrandId,
           images: ["https://images.example.com/pegasus-1.jpg"],
+          tags: ["marathon", "responsive", "cushion"],
           isActive: true,
           variants: [
             {
@@ -282,6 +283,35 @@ describe("Phase 3 — Product Catalog & Variants (Integration Tests)", () => {
       expect(res.status).toBe(201);
       expect(res.body.data.variants.length).toBe(3);
     });
+
+    it("should reject adding a variant with duplicate SKU within the same product", async () => {
+      const res = await request(app)
+        .post(`/api/v1/admin/products/${createdProductId}/variants`)
+        .set("Cookie", adminCookie)
+        .send({
+          sku: "PEG-BLK-42", // Already exists in this product
+          attributes: { color: "Black", size: "42" },
+          price: 9999,
+          costPrice: 5000,
+          stock: 5,
+          isActive: true
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain("Duplicate SKU");
+    });
+
+    it("should reject updating a variant to another existing variant's SKU in the same product", async () => {
+      const res = await request(app)
+        .patch(`/api/v1/admin/products/${createdProductId}/variants/${createdVariantId}`)
+        .set("Cookie", adminCookie)
+        .send({
+          sku: "PEG-BLU-44" // Already belongs to the 3rd variant
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain("Duplicate SKU");
+    });
   });
 
   // ============================================================================
@@ -380,12 +410,35 @@ describe("Phase 3 — Product Catalog & Variants (Integration Tests)", () => {
       expect(res.body.data[0].slug).toBe("budget-running-sneaker");
     });
 
-    it("should search products by keyword across name and description", async () => {
+    it("should search products by product name", async () => {
       const res = await request(app).get("/api/v1/products?search=Pegasus");
 
       expect(res.status).toBe(200);
       expect(res.body.data.length).toBe(1);
       expect(res.body.data[0].slug).toBe("nike-air-zoom-pegasus-40");
+    });
+
+    it("should search products by description", async () => {
+      const res = await request(app).get("/api/v1/products?search=cushioning");
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBe(1);
+      expect(res.body.data[0].slug).toBe("nike-air-zoom-pegasus-40");
+    });
+
+    it("should search products by tags", async () => {
+      const res = await request(app).get("/api/v1/products?search=marathon");
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBe(1);
+      expect(res.body.data[0].slug).toBe("nike-air-zoom-pegasus-40");
+    });
+
+    it("should return empty results when search keyword is irrelevant", async () => {
+      const res = await request(app).get("/api/v1/products?search=microwave-oven-xyz");
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBe(0);
     });
 
     it("should reject non-admin users from accessing admin product endpoints with 403 Forbidden", async () => {

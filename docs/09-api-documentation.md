@@ -45,15 +45,32 @@ All API endpoints follow strict REST conventions and are versioned under `/api/v
 > [!IMPORTANT]
 > **Data Protection Rule**: Public catalog endpoints strictly project away `variants.costPrice` via `.select('-variants.costPrice')`. Wholesale margins are never exposed to storefront visitors.
 
-### 2.4 Cart & Wishlist (`/api/v1/cart`, `/api/v1/wishlist`)
+### 2.4 Customer Address Management (`/api/v1/addresses`)
+All address endpoints require an active authenticated customer session (`req.user`). IDOR defense is enforced on every query by scoping with `userId: req.user._id`. Unauthorized attempts return `404 NOT_FOUND` to prevent ID enumeration.
+
 | Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/cart` | Get populated cart with live prices & stock | Yes | User | None | 200, 401 |
-| `POST` | `/cart/items` | Add product variant to cart | Yes | User | `{ productId, variantId, quantity }` | 200, 400, 409 |
-| `PATCH` | `/cart/items/:variantId` | Update item quantity in cart | Yes | User | `{ quantity }` | 200, 400, 409 |
-| `DELETE`| `/cart/items/:variantId` | Remove item from cart | Yes | User | None | 200 |
-| `GET` | `/wishlist` | View user's wishlist | Yes | User | None | 200 |
-| `POST` | `/wishlist/toggle`| Add or remove product from wishlist | Yes | User | `{ productId }` | 200 |
+| `GET` | `/addresses` | List all addresses for current user (default address first) | Yes | User/Admin | None | 200, 401 |
+| `POST` | `/addresses` | Create new delivery address (auto-default if first address) | Yes | User/Admin | `{ fullName, phone, addressLine1, addressLine2?, city, state, postalCode, country?, label?, isDefault? }` | 201, 400, 401, 422 |
+| `GET` | `/addresses/:id` | Get single address by ID (ownership verified) | Yes | User/Admin | None | 200, 401, 404 |
+| `PUT` | `/addresses/:id` | Update address fields (ownership verified) | Yes | User/Admin | `{ fullName?, phone?, addressLine1?, addressLine2?, city?, state?, postalCode?, country?, label?, isDefault? }` | 200, 400, 401, 404, 422 |
+| `PATCH` | `/addresses/:id/default` | Set address as default (atomically resets other defaults) | Yes | User/Admin | None | 200, 401, 404 |
+| `DELETE`| `/addresses/:id` | Delete address (auto-promotes another if deleting default) | Yes | User/Admin | None | 200, 401, 404 |
+
+### 2.5 Shopping Cart & Wishlist (`/api/v1/cart`, `/api/v1/wishlist`)
+Client prices are never accepted. Cart prices, discounts, and inventory availability are dynamically derived from active catalog variants on every retrieval. Wholesale `costPrice` is strictly omitted from all customer responses.
+
+| Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/cart` | Get customer cart with live catalog prices & stale stock flags | Yes | User/Admin | None | 200, 401 |
+| `POST` | `/cart/items` | Add product variant to cart (max 10 units per SKU) | Yes | User/Admin | `{ productId, variantId, quantity }` | 200, 400, 401, 404, 422 |
+| `PATCH` | `/cart/items/:variantId` | Update item quantity in cart (min 1, max 10) | Yes | User/Admin | `{ quantity }` | 200, 400, 401, 404, 422 |
+| `DELETE`| `/cart/items/:variantId` | Remove specific variant item from cart | Yes | User/Admin | None | 200, 401, 404 |
+| `DELETE`| `/cart` | Clear entire shopping cart | Yes | User/Admin | None | 200, 401 |
+| `GET` | `/wishlist` | View user's wishlist (omits wholesale costPrice) | Yes | User/Admin | None | 200, 401 |
+| `POST` | `/wishlist/items` | Add product to wishlist (enforces set uniqueness via `$addToSet`) | Yes | User/Admin | `{ productId }` | 200, 400, 401, 404, 422 |
+| `DELETE`| `/wishlist/items/:productId` | Remove product from wishlist | Yes | User/Admin | None | 200, 401, 404 |
+| `POST` | `/wishlist/toggle` | Toggle product in wishlist (adds if absent, removes if present) | Yes | User/Admin | `{ productId }` | 200, 400, 401, 404, 422 |
 
 ### 2.5 Checkout & Orders (`/api/v1/checkout`, `/api/v1/orders`)
 | Method | Endpoint | Purpose | Auth | Role | Request Body | Status Codes |

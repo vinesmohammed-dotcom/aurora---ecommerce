@@ -37,11 +37,32 @@ export default function Navbar() {
         </nav>
 
         {/* Action Controls */}
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-3">
+          <Link
+            to="/wishlist"
+            title="Wishlist"
+            className="p-2 text-slate-600 hover:text-rose-600 transition-colors"
+          >
+            <span className="sr-only">Wishlist</span>
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+              />
+            </svg>
+          </Link>
+
           <Link
             to="/cart"
-            onClick={() => dispatch(toggleCartDrawer())}
-            className="relative p-2 text-slate-600 hover:text-slate-900"
+            title="Shopping Cart"
+            className="relative p-2 text-slate-600 hover:text-slate-900 transition-colors"
           >
             <span className="sr-only">Cart</span>
             <svg
