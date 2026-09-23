@@ -128,3 +128,4 @@ const globalErrorHandler = (err, req, res, next) => {
 | **Database Column Names / Mongo Internals** | **Yes** | **NO** | Prevents disclosing schema internals for SQL/NoSQL injection crafting. |
 | **Full Stack Trace** (`at Layer.handle ...`) | **Yes** | **NO** | Never expose server directory paths, dependencies, or runtime internals. |
 | **Raw OTP Values / Password Hashes** | **NO** | **NO** | Secrets must never be transmitted in error payloads under any circumstance. |
+| **Payment Gateway Secrets & Webhook Signatures** | **NO** | **NO** | Gateway key secrets and webhook secrets must NEVER be included in error payloads or logs. |

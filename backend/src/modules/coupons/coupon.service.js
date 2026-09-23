@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Coupon = require("./coupon.model");
 const AppError = require("../../utils/AppError");
 const HTTP_CODES = require("../../constants/httpCodes");
@@ -170,29 +171,82 @@ class CouponService {
 
   /**
    * Record coupon redemption atomically upon successful order creation
+   * Enforces global usage limits and per-user limits atomically under concurrency.
    *
    * @param {Object} params
    * @param {string} params.code
-   * @param {string} params.userId
+   * @param {string|import("mongoose").Types.ObjectId} params.userId
    * @param {import("mongoose").ClientSession} [params.session]
    */
   static async recordCouponUsage({ code, userId, session = null }) {
     const normalizedCode = code.trim().toUpperCase();
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
     const coupon = await Coupon.findOne({ code: normalizedCode }).session(session);
-    if (!coupon) return;
-
-    coupon.usedCount += 1;
-
-    const userEntry = coupon.userUsage.find(
-      (u) => u.userId.toString() === userId.toString()
-    );
-    if (userEntry) {
-      userEntry.count += 1;
-    } else {
-      coupon.userUsage.push({ userId, count: 1 });
+    if (!coupon) {
+      throw new AppError(
+        `Coupon '${normalizedCode}' not found.`,
+        HTTP_CODES.NOT_FOUND,
+        ERROR_CODES.NOT_FOUND
+      );
     }
 
-    await coupon.save({ session });
+    const options = { new: true };
+    if (session) options.session = session;
+
+    // Condition: Global limit guard
+    const globalLimitCondition =
+      coupon.usageLimit !== null
+        ? { usedCount: { $lt: coupon.usageLimit } }
+        : {};
+
+    // Branch A: User has already redeemed before and count < perUserLimit
+    let updatedCoupon = await Coupon.findOneAndUpdate(
+      {
+        _id: coupon._id,
+        ...globalLimitCondition,
+        userUsage: {
+          $elemMatch: {
+            userId: userObjectId,
+            count: { $lt: coupon.perUserLimit }
+          }
+        }
+      },
+      {
+        $inc: {
+          usedCount: 1,
+          "userUsage.$.count": 1
+        }
+      },
+      options
+    );
+
+    // Branch B: User has NOT redeemed yet (userUsage array does not contain userObjectId)
+    if (!updatedCoupon) {
+      updatedCoupon = await Coupon.findOneAndUpdate(
+        {
+          _id: coupon._id,
+          ...globalLimitCondition,
+          "userUsage.userId": { $nin: [userObjectId] }
+        },
+        {
+          $inc: { usedCount: 1 },
+          $push: { userUsage: { userId: userObjectId, count: 1 } }
+        },
+        options
+      );
+    }
+
+    // If both branches returned null, limits were exceeded
+    if (!updatedCoupon) {
+      throw new AppError(
+        `Coupon redemption failed: usage limit exceeded for coupon '${normalizedCode}'.`,
+        HTTP_CODES.BAD_REQUEST,
+        ERROR_CODES.VALIDATION_ERROR
+      );
+    }
+
+    return updatedCoupon;
   }
 }
 

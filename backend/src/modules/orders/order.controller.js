@@ -7,7 +7,8 @@ class OrderController {
    */
   static async createCodOrder(req, res, next) {
     try {
-      const { addressId, couponCode, idempotencyKey } = req.body;
+      const { addressId, couponCode } = req.body;
+      const idempotencyKey = req.headers["idempotency-key"] || req.body.idempotencyKey;
       const order = await OrderService.createCodOrder({
         userId: req.user._id,
         addressId,
@@ -118,6 +119,95 @@ class OrderController {
       return res.status(HTTP_CODES.OK).json({
         success: true,
         message: `Order status updated to ${status}.`,
+        data: { order }
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Customer: Request Return for a Delivered Order within 7 Days
+   */
+  static async requestReturn(req, res, next) {
+    try {
+      const { reason } = req.body;
+      const order = await OrderService.requestReturn({
+        orderId: req.params.id,
+        userId: req.user._id,
+        reason
+      });
+
+      return res.status(HTTP_CODES.OK).json({
+        success: true,
+        message: "Return request submitted successfully.",
+        data: { order }
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Admin: Review and Approve or Reject Return Request
+   */
+  static async reviewReturn(req, res, next) {
+    try {
+      const { decision, rejectionReason } = req.body;
+      const order = await OrderService.reviewReturnRequest({
+        orderId: req.params.id,
+        adminId: req.user._id,
+        decision,
+        rejectionReason
+      });
+
+      return res.status(HTTP_CODES.OK).json({
+        success: true,
+        message: `Return request ${decision.toLowerCase()} successfully.`,
+        data: { order }
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Admin: Mark Returned Item as Received at Warehouse
+   */
+  static async markReturnReceived(req, res, next) {
+    try {
+      const order = await OrderService.markReturnReceived({
+        orderId: req.params.id,
+        adminId: req.user._id
+      });
+
+      return res.status(HTTP_CODES.OK).json({
+        success: true,
+        message: "Returned item marked as received at warehouse.",
+        data: { order }
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Admin: Inspect Returned Item & Decide Restocking
+   */
+  static async inspectReturn(req, res, next) {
+    try {
+      const { inspectionPassed, restock, notes } = req.body;
+      const order = await OrderService.inspectReturnItem({
+        orderId: req.params.id,
+        adminId: req.user._id,
+        inspectionPassed,
+        restock,
+        notes
+      });
+
+      return res.status(HTTP_CODES.OK).json({
+        success: true,
+        message: "Return inspection completed successfully.",
         data: { order }
       });
     } catch (err) {

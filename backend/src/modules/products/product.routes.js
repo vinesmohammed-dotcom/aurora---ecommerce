@@ -30,6 +30,7 @@ publicProductRouter.get("/:slug", productController.getPublicProductBySlug);
 const adminProductRouter = Router();
 adminProductRouter.use(requireAuth, requireRole("ADMIN"));
 
+adminProductRouter.get("/inventory", productController.getInventoryAdmin);
 adminProductRouter.get("/", productController.getAdminProducts);
 adminProductRouter.get("/:id", productController.getAdminProductById);
 adminProductRouter.post("/", validate(createProductSchema), productController.createProduct);

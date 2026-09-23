@@ -191,5 +191,77 @@ describe("Phase 5 — Promotional Coupons & Authoritative Limits (Integration Te
         })
       ).rejects.toThrow("maximum allowed (1) time(s)");
     });
+
+    it("Atomically prevents concurrent requests from exceeding per-user limit", async () => {
+      const future = new Date();
+      future.setDate(future.getDate() + 5);
+
+      await Coupon.create({
+        code: "CONCURRENT_PER_USER",
+        discountType: "FLAT",
+        discountValue: 100,
+        expiryDate: future,
+        usageLimit: 10,
+        perUserLimit: 1,
+        usedCount: 0,
+        userUsage: [],
+        isActive: true
+      });
+
+      // Run two concurrent redemption requests for the SAME user
+      const results = await Promise.allSettled([
+        CouponService.recordCouponUsage({ code: "CONCURRENT_PER_USER", userId }),
+        CouponService.recordCouponUsage({ code: "CONCURRENT_PER_USER", userId })
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+
+      // Exactly one must succeed, one must fail!
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+
+      // Verify coupon document in DB has exactly 1 usage
+      const updated = await Coupon.findOne({ code: "CONCURRENT_PER_USER" });
+      expect(updated.usedCount).toBe(1);
+      expect(updated.userUsage.length).toBe(1);
+      expect(updated.userUsage[0].count).toBe(1);
+    });
+
+    it("Atomically prevents concurrent requests from exceeding global usage limit", async () => {
+      const future = new Date();
+      future.setDate(future.getDate() + 5);
+
+      await Coupon.create({
+        code: "CONCURRENT_GLOBAL",
+        discountType: "FLAT",
+        discountValue: 100,
+        expiryDate: future,
+        usageLimit: 1, // Only 1 total globally
+        perUserLimit: 1,
+        usedCount: 0,
+        userUsage: [],
+        isActive: true
+      });
+
+      const user1 = new mongoose.Types.ObjectId();
+      const user2 = new mongoose.Types.ObjectId();
+
+      // Run two concurrent redemption requests for DIFFERENT users
+      const results = await Promise.allSettled([
+        CouponService.recordCouponUsage({ code: "CONCURRENT_GLOBAL", userId: user1 }),
+        CouponService.recordCouponUsage({ code: "CONCURRENT_GLOBAL", userId: user2 })
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+
+      // Exactly one must succeed, one must fail!
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+
+      const updated = await Coupon.findOne({ code: "CONCURRENT_GLOBAL" });
+      expect(updated.usedCount).toBe(1);
+    });
   });
 });

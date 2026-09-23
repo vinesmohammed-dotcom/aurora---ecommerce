@@ -128,12 +128,44 @@ Client prices are never accepted. Cart prices, discounts, and inventory availabi
 | `PATCH` | `/admin/orders/:id/status`| Advance order lifecycle along state machine | Yes | Admin | `{ status, note? }` | 200, 400, 401, 403, 404, 422 |
 | `POST` | `/admin/orders/:id/cancel` | Admin cancel order with stock restoration | Yes | Admin | `{ reason? }` | 200, 400, 401, 403, 404 |
 
-### 2.11 Wallet (`/api/v1/wallet`)
+### 2.11 Online Payments (`/api/v1/payments`)
 | Method | Endpoint | Purpose | Auth | Role | Query / Body | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/` | (Phase 6) Get current balance and recent transactions | Yes | User | `page, limit` | 200 |
+| `POST` | `/payments/create` | Authoritative calculation, upfront stock decrement, Razorpay order generation | Yes | User | `{ addressId, couponCode?, idempotencyKey? }` | 201, 400, 401, 422 |
+| `POST` | `/payments/verify` | Constant-time HMAC-SHA256 signature verification and order confirmation | Yes | User | `{ razorpay_order_id, razorpay_payment_id, razorpay_signature }` | 200, 400, 401, 403, 404, 422 |
+| `POST` | `/payments/retry` | Initialize new gateway order for unpaid/failed internal order without rebuilding cart | Yes | User | `{ orderId }` | 200, 400, 401, 404, 422 |
+| `POST` | `/payments/webhook`| Public webhook with raw body HMAC verification and x-razorpay-event-id deduplication | No | Public | Raw Body Buffer + Headers `x-razorpay-signature`, `x-razorpay-event-id` | 200, 400 |
+| `GET` | `/payments/order/:orderId` | Query payment record by order identifier for status reconciliation | Yes | User | Params: `orderId` | 200, 401, 404 |
+| `GET` | `/payments/:id` | Query payment record by payment identifier (Anti-IDOR protected) | Yes | User/Admin | Params: `id` | 200, 401, 403, 404 |
 
-### 2.12 Admin Catalog & Operations (`/api/v1/admin/products`, `/api/v1/categories`, `/api/v1/brands`)
+### 2.12 Customer Wallet & Ledger (`/api/v1/wallet`)
+| Method | Endpoint | Purpose | Auth | Role | Query / Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/wallet` | Get authenticated user's wallet profile and balance | Yes | User | None | 200, 401 |
+| `GET` | `/wallet/transactions` | Get paginated append-only ledger transaction history | Yes | User | Query: `page, limit` | 200, 401 |
+
+### 2.13 Gateway Refunds (`/api/v1/refunds`)
+| Method | Endpoint | Purpose | Auth | Role | Query / Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/refunds` | Initiate gateway refund against captured online payment | Yes | User/Admin | `{ orderId, amount?, reason, idempotencyKey? }` | 201, 400, 401, 403, 404 |
+| `GET` | `/refunds/order/:orderId` | Get all refunds issued for a specific order | Yes | User/Admin | Params: `orderId` | 200, 401, 403, 404 |
+| `GET` | `/admin/refunds` | List all platform refunds with status filter and pagination | Yes | Admin | Query: `page, limit, status, search` | 200, 401, 403 |
+| `POST` | `/admin/refunds/order/:orderId/settle` | Settle late-captured CANCELLED order (REFUND_REQUIRED) | Yes | Admin | Params: `orderId` | 200, 400, 401, 403, 404 |
+
+### 2.14 Admin Wallets (`/api/v1/admin/wallets`)
+| Method | Endpoint | Purpose | Auth | Role | Query / Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/admin/wallets/:userId` | View target user's wallet profile and balance | Yes | Admin | Params: `userId` | 200, 401, 403, 404 |
+| `POST` | `/admin/wallets/:userId/credit` | Audited manual credit (promotions, goodwill) | Yes | Admin | `{ amount, reason, referenceId? }` | 200, 400, 401, 403, 404 |
+| `POST` | `/admin/wallets/:userId/debit` | Audited manual debit (accounting corrections) | Yes | Admin | `{ amount, reason, referenceId? }` | 200, 400, 401, 403, 404 |
+
+### 2.15 Order Returns (`/api/v1/orders`)
+| Method | Endpoint | Purpose | Auth | Role | Query / Body | Status Codes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/orders/:id/return` | Request return for DELIVERED order within 7-day window | Yes | User | `{ reason }` | 200, 400, 401, 403, 404 |
+| `POST` | `/admin/orders/:id/return/review` | Admin review return request (APPROVE or REJECT) | Yes | Admin | `{ decision: "APPROVED"\|"REJECTED", rejectionReason? }` | 200, 400, 401, 403, 404 |
+
+### 2.16 Admin Catalog & Operations (`/api/v1/admin/products`, `/api/v1/categories`, `/api/v1/brands`)
 | Method | Endpoint | Purpose | Auth | Role | Request Body / Query | Status Codes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/admin/products/all` | List all products including drafts & costPrice | Yes | Admin | `page, limit, search, category, brand` | 200, 401, 403 |

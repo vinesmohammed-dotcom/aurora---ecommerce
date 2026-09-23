@@ -1,6 +1,7 @@
 const app = require("./app");
 const env = require("./config/env");
 const { connectDB, disconnectDB } = require("./config/database");
+const { setShuttingDown } = require("./modules/health/health.controller");
 
 let server;
 
@@ -28,6 +29,9 @@ const startServer = async () => {
  */
 const handleGracefulShutdown = async (signal) => {
   console.log(`\n[Process] Received ${signal}. Starting graceful shutdown...`);
+
+  // Immediately signal reverse proxy / load balancer that node is no longer accepting traffic
+  setShuttingDown(true);
 
   if (server) {
     server.close(async () => {

@@ -6,7 +6,10 @@ const {
   createCodOrderSchema,
   cancelOrderSchema,
   updateOrderStatusSchema,
-  orderIdParamSchema
+  orderIdParamSchema,
+  requestReturnSchema,
+  reviewReturnSchema,
+  inspectReturnSchema
 } = require("./order.validator");
 
 // Customer routes: /api/v1/orders
@@ -26,6 +29,12 @@ customerOrderRouter.post(
   validate(cancelOrderSchema),
   OrderController.cancelOrder
 );
+customerOrderRouter.post(
+  "/:id/return",
+  validate(orderIdParamSchema, "params"),
+  validate(requestReturnSchema),
+  OrderController.requestReturn
+);
 
 // Admin routes: /api/v1/admin/orders
 const adminOrderRouter = Router();
@@ -44,6 +53,23 @@ adminOrderRouter.post(
   validate(orderIdParamSchema, "params"),
   validate(cancelOrderSchema),
   OrderController.cancelOrder
+);
+adminOrderRouter.post(
+  "/:id/return/review",
+  validate(orderIdParamSchema, "params"),
+  validate(reviewReturnSchema),
+  OrderController.reviewReturn
+);
+adminOrderRouter.post(
+  "/:id/return/receive",
+  validate(orderIdParamSchema, "params"),
+  OrderController.markReturnReceived
+);
+adminOrderRouter.post(
+  "/:id/return/inspect",
+  validate(orderIdParamSchema, "params"),
+  validate(inspectReturnSchema),
+  OrderController.inspectReturn
 );
 
 module.exports = {

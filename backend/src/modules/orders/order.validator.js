@@ -43,9 +43,38 @@ const orderIdParamSchema = z.object({
   id: z.string().regex(objectIdRegex, "Invalid order ID")
 });
 
+const requestReturnSchema = z.object({
+  reason: z
+    .string({ required_error: "Return reason is required" })
+    .trim()
+    .min(3, "Return reason must be at least 3 characters")
+    .max(500, "Return reason cannot exceed 500 characters")
+});
+
+const reviewReturnSchema = z.object({
+  decision: z.enum(["APPROVED", "REJECTED"], {
+    required_error: "Decision must be 'APPROVED' or 'REJECTED'"
+  }),
+  rejectionReason: z
+    .string()
+    .trim()
+    .max(500, "Rejection reason cannot exceed 500 characters")
+    .optional()
+    .default("")
+});
+
+const inspectReturnSchema = z.object({
+  inspectionPassed: z.boolean({ required_error: "inspectionPassed must be a boolean" }),
+  restock: z.boolean().optional().default(true),
+  notes: z.string().trim().max(500).optional().default("")
+});
+
 module.exports = {
   createCodOrderSchema,
   cancelOrderSchema,
   updateOrderStatusSchema,
-  orderIdParamSchema
+  orderIdParamSchema,
+  requestReturnSchema,
+  reviewReturnSchema,
+  inspectReturnSchema
 };

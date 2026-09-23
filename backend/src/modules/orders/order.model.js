@@ -137,22 +137,79 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["COD"],
+      enum: ["COD", "ONLINE_RAZORPAY"],
       default: "COD"
     },
     paymentStatus: {
       type: String,
-      enum: ["PENDING", "COMPLETED", "FAILED"],
+      enum: [
+        "PENDING",
+        "COMPLETED",
+        "FAILED",
+        "EXPIRED",
+        "REFUND_REQUIRED",
+        "REFUND_PENDING",
+        "REFUNDED",
+        "PARTIALLY_REFUNDED"
+      ],
       default: "PENDING"
+    },
+    paymentExpiresAt: {
+      type: Date,
+      default: null,
+      index: true
     },
     orderStatus: {
       type: String,
-      enum: ["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"],
+      enum: [
+        "PENDING",
+        "CONFIRMED",
+        "PROCESSING",
+        "SHIPPED",
+        "DELIVERED",
+        "CANCELLED",
+        "RETURN_REQUESTED",
+        "RETURN_APPROVED",
+        "RETURN_REJECTED",
+        "RETURN_RECEIVED",
+        "RETURN_INSPECTED",
+        "RETURNED"
+      ],
       default: "CONFIRMED"
     },
     statusHistory: {
       type: [orderStatusHistorySchema],
       default: []
+    },
+    returnRequest: {
+      status: {
+        type: String,
+        enum: [
+          "NONE",
+          "REQUESTED",
+          "APPROVED",
+          "REJECTED",
+          "RECEIVED",
+          "INSPECTED_PASSED",
+          "INSPECTED_FAILED"
+        ],
+        default: "NONE"
+      },
+      reason: { type: String, default: "" },
+      requestedAt: { type: Date, default: null },
+      reviewedAt: { type: Date, default: null },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      rejectionReason: { type: String, default: "" },
+      receivedAt: { type: Date, default: null },
+      receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      inspectionDetails: {
+        inspectedAt: { type: Date, default: null },
+        inspectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        passed: { type: Boolean, default: null },
+        restocked: { type: Boolean, default: null },
+        notes: { type: String, default: "" }
+      },
+      inventoryRestored: { type: Boolean, default: false }
     },
     idempotencyKey: {
       type: String,
@@ -174,8 +231,10 @@ const orderSchema = new mongoose.Schema(
 
 orderSchema.index({ userId: 1, createdAt: -1 });
 orderSchema.index({ orderStatus: 1 });
+orderSchema.index({ createdAt: -1 });
+orderSchema.index({ createdAt: -1, orderStatus: 1 });
 orderSchema.index(
-  { idempotencyKey: 1 },
+  { userId: 1, idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } }
 );
 

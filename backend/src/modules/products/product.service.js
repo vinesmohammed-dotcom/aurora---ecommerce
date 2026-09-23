@@ -248,9 +248,82 @@ class ProductService {
   }
 
   /**
+   * Admin: Get inventory visibility matrix across all product variants
+   */
+  static async getInventoryAdmin({ search, lowStockOnly = false, page = 1, limit = 50 } = {}) {
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+
+    const products = await Product.find({})
+      .populate("category", "name slug")
+      .populate("brand", "name slug")
+      .lean();
+
+    let inventoryItems = [];
+    for (const prod of products) {
+      for (const variant of prod.variants || []) {
+        inventoryItems.push({
+          productId: prod._id,
+          productName: prod.name,
+          slug: prod.slug,
+          category: prod.category ? prod.category.name : "Uncategorized",
+          brand: prod.brand ? prod.brand.name : "Unbranded",
+          variantId: variant._id,
+          sku: variant.sku,
+          attributes: variant.attributes || {},
+          price: variant.price,
+          costPrice: variant.costPrice,
+          stock: variant.stock,
+          isLowStock: variant.stock < 10,
+          isOutOfStock: variant.stock === 0,
+          isActive: prod.isActive && variant.isActive
+        });
+      }
+    }
+
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      inventoryItems = inventoryItems.filter(
+        (item) =>
+          item.productName.toLowerCase().includes(q) ||
+          item.sku.toLowerCase().includes(q) ||
+          item.category.toLowerCase().includes(q) ||
+          item.brand.toLowerCase().includes(q)
+      );
+    }
+
+    if (lowStockOnly === true || lowStockOnly === "true") {
+      inventoryItems = inventoryItems.filter((item) => item.isLowStock);
+    }
+
+    // Sort by stock ascending so lowest stock variants appear first
+    inventoryItems.sort((a, b) => a.stock - b.stock);
+
+    const total = inventoryItems.length;
+    const startIndex = (safePage - 1) * safeLimit;
+    const paginatedItems = inventoryItems.slice(startIndex, startIndex + safeLimit);
+
+    return {
+      inventory: paginatedItems,
+      summary: {
+        totalVariants: total,
+        lowStockCount: inventoryItems.filter((i) => i.isLowStock).length,
+        outOfStockCount: inventoryItems.filter((i) => i.isOutOfStock).length
+      },
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit) || 1
+      }
+    };
+  }
+
+  /**
    * Admin: Get single product by ID (including costPrice)
    */
   static async getAdminProductById(id) {
+
     const product = await Product.findById(id)
       .populate("brand", "name slug")
       .populate("category", "name slug");

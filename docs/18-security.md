@@ -24,25 +24,88 @@ Security in our e-commerce platform relies on **Defense in Depth**—layering co
 | **Wholesale Margin Leakage** | Attackers intercepting API responses to inspect merchant cost prices (`costPrice`). | **Selective Projection**: Customer-facing endpoints strictly execute `.select('-variants.costPrice')`. Cost prices are exclusively accessible on administrative endpoints protected by `requireRole('ADMIN')`. |
 | **NoSQL / Mongo Injection** | Attacker submitting `{ "$gt": "" }` in password field to bypass query checks. | **Zod Schema Validation**: Input validator enforces strict primitive types (e.g. `z.string().min(8)`), throwing 422 errors if objects or operators are passed. |
 | **Sensitive Data in Logs** | Plaintext credentials appearing in access logs or debugging output. | **Log Scrubbing**: Morgan logger is configured to log request metadata only (method, URL, status code, response time), omitting request bodies. |
+| **Payment Secret Exposure** | Leakage of `RAZORPAY_KEY_SECRET` or webhook secrets to frontend client. | **Strict Server Isolation**: Only `RAZORPAY_KEY_ID` is provided to the client for the modal. Key secrets are never injected into client bundles or API responses. |
+| **Payment Signature Forgery & Timing Attacks** | Attacker guessing or modifying client callback parameters to fake payment success. | **Constant-Time Verification**: Server re-computes `HMAC-SHA256(order_id|payment_id, KEY_SECRET)` and verifies with `crypto.timingSafeEqual` in constant time, preventing timing side-channel attacks. |
+| **Payment IDOR Attack** | User A faking or confirming payment for User B's order by guessing `order_id`. | **Anti-IDOR Ownership Scoping**: Verification queries enforce `payment.userId === req.user._id`. Unauthorized attempts are rejected with 403 Forbidden. |
+| **Webhook Signature Bypass & Replay** | Attacker sending fake `payment.captured` webhooks or replaying previously captured webhooks. | **Raw Body Verification + Event Deduplication**: Webhooks verify HMAC signatures against the unparsed raw request body buffer. The unique index on `PaymentEvent.eventId` rejects repeated deliveries. |
+| **Wallet IDOR & Balance Tampering** | Malicious user attempting to read, credit, or debit another customer's wallet balance. | **Session Extraction & Role Isolation**: Customer wallet endpoints derive `userId` strictly from authenticated session (`req.user._id`). Admin adjustment endpoints require `requireRole('ADMIN')` and log the modifying `adminId` and reason. |
+| **Duplicate Wallet Credit/Debit Attack** | Network retries or parallel requests duplicating promotional credits or wallet payments. | **Compound Unique Ledger Index**: `WalletTransaction` enforces `{ referenceType: 1, referenceId: 1 }` unique constraint, rejecting duplicate mutations for identical business references. |
+| **Concurrent Refund Race Conditions & Over-Refund Exploit** | Multiple rapid/parallel refund requests attempting to refund more money than was originally captured before database commits complete. | **Pre-Gateway Atomic Capacity Reservation (ADR-32)**: Server reserves capacity directly on `Payment` via atomic conditional query `{ _id, $expr: { $lte: [{ $add: ["$committedRefundPaise", requestedPaise] }, "$amount"] } }` with `$inc`. On gateway failure, reserved capacity is atomically released. Unique partial index on `Refund` enforces `{ paymentId: 1, idempotencyKey: 1 }`. |
+| **Premature / Fraudulent Stock Replenishment on Return** | Customer requests return, inventory is restored immediately, but customer keeps goods or returns damaged/counterfeit items. | **Physical Receipt & Inspection Gate (ADR-33)**: Stock is **never** restored upon return approval. Stock is restored strictly after physical arrival (`RETURN_RECEIVED`) and quality inspection (`RETURN_INSPECTED`) with `inspectionPassed: true` and `restock: true`. Duplicate restoration is guarded via `inventoryRestored: Boolean`. |
+| **Unauthorized Refund Creation** | Standard authenticated user or attacker attempting to initiate refunds directly via API. | **Role-Based Access Control**: `POST /api/v1/refunds` and return management endpoints strictly require `requireAuth` + `requireRole("ADMIN")`. Non-admins receive HTTP 403 Forbidden. |
+| **Database Transaction Starvation** | External payment gateway refund latency exhausting database connection pools. | **ADR-29 Boundary Isolation**: Razorpay refund network calls execute strictly outside MongoDB transactions. Database mutations run in short, millisecond-duration ACID transactions. |
+
+| **Session Fixation Attack** | Malicious actor forces a pre-set session cookie on victim; rides the session after victim logs in. | **Session Regeneration on Authentication**: `req.session.regenerate()` is executed upon successful login and registration OTP verification. An authoritative `req.session.authTime` is recorded in the newly minted session. |
+| **Stale Session Post-Credential Change** | User changes or resets password, but active sessions on compromised devices remain alive. | **`passwordChangedAt` Timestamp Gating**: `user.passwordChangedAt` is updated on password changes, existing sessions are purged from MongoDB, and `requireAuth` dynamically revokes any session issued prior to `passwordChangedAt`. |
+| **Clickjacking & Unvetted Script Execution** | Malicious page frames checkout window or injects unauthorized scripts. | **Helmet Content Security Policy & Frame-Ancestors**: Customized CSP with `frameAncestors: ["'none'"]`, explicit script permissions for `checkout.razorpay.com`, and HSTS enabled in production. |
+| **State-Changing CSRF via Cross-Origin Requests** | Malicious site exploiting browser cookies during state-changing POST/PUT/DELETE calls. | **Origin / Referer Validation Middleware**: Checks incoming state-changing request origins against `env.FRONTEND_URL`. Exempts HMAC-verified server-to-server Razorpay webhooks. |
+| **Payment Gateway Flooding & Webhook DoS** | Malicious bots spamming payment creation or flooding webhook endpoints. | **Specialized Rate Limiters**: `paymentLimiter` (30 req / 15 min) throttles payment initiation and verification; `webhookLimiter` (120 req / 1 min) throttles webhook payloads while allowing burst processing. |
 
 ---
 
-## 3. Rate Limiting Configuration Registry (`backend/src/middlewares/rateLimiter.middleware.js`)
+## 3. Structured Financial Audit Logging (`backend/src/utils/auditLogger.js`)
+
+All high-risk financial and inventory operations produce structured audit log entries. The audit logger automatically sanitizes metadata to guarantee zero leakage of credentials, tokens, OTPs, or gateway secrets.
+
+### Supported Financial Audit Actions:
+- `ADMIN_WALLET_CREDIT`: Administrative credit to customer wallet.
+- `ADMIN_WALLET_DEBIT`: Administrative debit from customer wallet.
+- `ADMIN_INITIATED_REFUND`: Administrative creation of Razorpay gateway refund.
+- `ADMIN_APPROVED_RETURN`: Administrative approval of customer return request.
+- `ADMIN_REJECTED_RETURN`: Administrative rejection of customer return request.
+
+### Secret Redaction Engine:
+```javascript
+const SENSITIVE_KEYS = new Set([
+  "password", "passwordhash", "token", "otp", "secret",
+  "keysecret", "authorization", "cookie", "razorpay_signature"
+]);
+```
+Every audit log record captures: `timestamp`, `action`, `adminId`, `targetId`, sanitized `details`, and `ipAddress`.
+
+---
+
+## 4. Rate Limiting Configuration Registry (`backend/src/middlewares/rateLimiter.middleware.js`)
 
 ```javascript
-// Global API Limiter: 100 req / 15 min (prod), 1000 req / 15 min (dev)
-const apiRateLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: isDev ? 1000 : 100 });
+// Global API Limiter: 300 req / 15 min
+const apiRateLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 
 // Auth Limiter (Login, Registration): 10 req / 15 min
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: "Too many authentication attempts..." });
 
-// OTP Limiter (Verification, Resend, Reset): 5 req / 15 min
-const otpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: "Too many OTP requests..." });
+// OTP Limiter (Verification, Resend, Reset): 5 req / 5 min
+const otpLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 5, message: "Too many OTP requests..." });
+
+// Payment Limiter (Create, Verify, Retry): 30 req / 15 min
+const paymentLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: "Too many payment requests..." });
+
+// Webhook Limiter (Razorpay Webhook Endpoint): 120 req / 1 min
+const webhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, message: "Webhook rate limit exceeded..." });
 ```
 
 ---
 
-## 4. Environment & Secret Governance
+## 5. Environment & Secret Governance
 - **Git Protection**: `.env` is permanently ignored via `.gitignore`. `.env.example` documents required environment keys with safe placeholders.
 - **Session Secrets**: `SESSION_SECRET` requires a minimum 32-character high-entropy string in production.
-- **Fail-Fast Configuration**: `backend/src/config/environment.js` validates all critical environment variables on startup, terminating immediately with an informative error if variables are missing.
+- **Fail-Fast Configuration**: `backend/src/config/env.js` validates all critical environment variables on startup, terminating immediately with an informative error if variables are missing.
+- **Client Boundary Protection**: Only `VITE_API_URL` is exposed to the frontend; backend secrets are never prefixed with `VITE_`.
+
+---
+
+## 6. AWS Cloud Security Groups & Network Isolation Policies
+- **Host Firewall (Security Group)**:
+  - Inbound Port 80 (HTTP) open to `0.0.0.0/0` (redirects 301 to HTTPS via Nginx).
+  - Inbound Port 443 (HTTPS) open to `0.0.0.0/0` (TLS 1.2/1.3 encrypted browser traffic).
+  - Inbound Port 22 (SSH) strictly restricted to the administrator's static IP (`Admin_IP/32`).
+  - Backend Port 5000 is **strictly blocked** from the public internet; accessible only internally via Nginx reverse proxy loopback.
+- **Database Network Isolation (MongoDB Atlas)**:
+  - Atlas network access whitelist is restricted strictly to the EC2 Elastic IP.
+  - TLS 1.3 encryption in-transit for all database connections (`mongodb+srv://`).
+- **AWS S3 Least Privilege**:
+  - S3 bucket blocks all public ACLs and public policies.
+  - Client uploads use short-lived (5-minute) Presigned URLs generated by the backend with `@aws-sdk/s3-request-presigner`.
+
+
+

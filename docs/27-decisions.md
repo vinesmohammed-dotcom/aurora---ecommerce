@@ -201,6 +201,75 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 - **Simpler alternative**: Reserving stock without rollback or requiring replica set transactions.
 - **Why alternative rejected**: Traps inventory in un-purchased state on standalone instances or failures.
 
+### ADR-28: Upfront Stock Reservation at Internal Order Creation for Online Payments
+- **Why we need it**: Absolute prevention of overselling and accepting customer payment for out-of-stock inventory.
+- **Problem it solves**: If stock is only decremented upon payment verification (Option B), multiple users can pay simultaneously for the last remaining item. Both bank accounts are charged, but one customer cannot be fulfilled, causing customer outrage and requiring manual banking refunds.
+- **Why appropriate**: Decrement stock upfront when creating the internal order in `PENDING` state. The payment verification callback and webhook only transition state to `CONFIRMED` and do NOT double-decrement stock. If the order is cancelled, stock is restored via `StockService.restoreVariantStock`.
+- **Simpler alternative**: Decrementing stock after payment callback.
+- **Why alternative rejected**: Creates severe race conditions under concurrent checkouts and accepts customer money for non-existent stock.
+
+### ADR-29: Zero MongoDB Transaction Holding Across External Gateway Network Calls
+- **Why we need it**: Protection of database connection pools and prevention of transaction timeout failures.
+- **Problem it solves**: Network calls to external payment APIs (like Razorpay) have unpredictable latency (500ms - 10s). Holding a database transaction open while awaiting external HTTP responses exhausts database connections and triggers transaction timeout errors.
+- **Why appropriate**: All external Razorpay API calls execute strictly outside MongoDB transactions. Internal state mutations before (order setup) and after (payment capture) execute inside fast, isolated, millisecond-duration ACID transactions.
+- **Simpler alternative**: Wrapping the entire payment creation or webhook processing inside a single outer transaction.
+- **Why alternative rejected**: Causes connection pool exhaustion, locks database resources during network delays, and fails transaction limits.
+
+### ADR-30: Policy Separation of Online Gateway Refunds vs. Customer Stored-Value Wallet
+- **Why we need it**: Regulatory compliance, consumer trust, and clear accounting separation.
+- **Problem it solves**: Forcing customers who paid via UPI or card to receive refunds into a closed-loop store wallet creates customer frustration, violates regulatory guidelines (RBI e-commerce guidelines mandate refunding to source of funds unless customer opts otherwise), and creates accounting ambiguity between merchant liabilities and platform stored value.
+- **Why appropriate**: Captured Razorpay payments are refunded directly back to the original payment source using the Razorpay gateway refund API. The customer wallet is reserved exclusively for promotional credits, goodwill compensation, and manual administrative adjustments.
+- **Simpler alternative**: Refunding all cancelled orders and returns as wallet credits.
+- **Why alternative rejected**: Violates customer expectations for online payments and introduces unnecessary financial regulatory friction for a retail platform.
+
+### ADR-31: Money Representation in Integer Minor Units (Paise)
+- **Why we need it**: Absolute precision in financial arithmetic without floating-point inaccuracies.
+- **Problem it solves**: IEEE 754 double-precision floating-point arithmetic introduces silent rounding errors (e.g. `0.1 + 0.2 === 0.30000000000000004`). In financial systems, accumulating sub-cent fractions leads to reconciliation discrepancies, over-refunds, and audit failures.
+- **Why appropriate**: Standardizes all monetary values across `Payment`, `Refund`, `Wallet`, and `WalletTransaction` to integer minor units (INR: ₹1 = 100 paise; ₹1000 = 100000 paise). All database schemas enforce `validate: Number.isInteger`. Conversions to major currency units (rupees) occur strictly at user-facing presentation and UI display boundaries.
+- **Simpler alternative**: Storing decimal floats (`10.50`) and calling `Math.round(x * 100) / 100` before every write.
+- **Why alternative rejected**: Error-prone, leaks floating-point drift across services, and risks accidental double-multiplication or double-division by 100.
+
+### ADR-32: Refund Concurrency & Pre-Gateway Capacity Reservation
+- **Why we need it**: Prevents concurrent refund requests from over-refunding a captured payment.
+- **Problem it solves**: In a concurrent environment, two simultaneous refund requests (e.g. two admin clicks or parallel API calls for ₹700 each on a ₹1000 payment) could both read available capacity as ₹1000 and both proceed to refund, resulting in ₹1400 refunded against a ₹1000 payment.
+- **Why appropriate**: Employs an atomic conditional reservation pattern on `Payment` (`committedRefundPaise + requestedPaise <= amount`) and internal `PENDING` refund records prior to making any external network calls. If the external Razorpay API fails, the reserved capacity is atomically released (`$inc: -requestedPaise`), and the refund is marked `FAILED` for retry.
+- **Simpler alternative**: Relying solely on Razorpay's API to reject duplicate or excess refunds.
+- **Why alternative rejected**: Violates defense-in-depth, leaves internal application state vulnerable, and exhausts gateway API limits.
+
+### ADR-33: Return Inventory Timing & Quality Inspection Gate
+- **Why we need it**: Protects sellable inventory from being replenished with goods that have not been physically received or that are damaged.
+- **Problem it solves**: Restoring inventory when an administrator approves a return request causes phantom inventory to be sold to other customers before the returned item is ever returned, or when the returned item arrives broken/unusable.
+- **Why appropriate**: Implements a phased return state machine (`RETURN_REQUESTED` $\rightarrow$ `RETURN_APPROVED` $\rightarrow$ `RETURN_RECEIVED` $\rightarrow$ `RETURN_INSPECTED` $\rightarrow$ `RETURNED`). Stock restoration occurs strictly after physical receipt and an inspection pass (`inspectionPassed: true, restock: true`). Damaged returns are logged as non-restockable with sellable stock untouched.
+- **Simpler alternative**: Restoring stock immediately upon return approval.
+- **Why alternative rejected**: Re-lists defective or unreturned items for sale, leading to fulfillment failure for subsequent buyers.
+
+### ADR-34: Executive Reporting, Minor-Unit Aggregation, and Pure-JS PDF Streaming Architecture
+- **Why we need it**: Real-time business intelligence, financial reconciliation, and exportable audit documents for platform administrators without server binary bloat.
+- **Problem it solves**: Computing financial metrics on the fly using application loops risks floating-point drift, memory overhead, and timeouts on large datasets. Generating PDFs via headless browsers (Puppeteer, Chromium) introduces massive native binary footprints (~300MB), complex multi-platform build errors, and high memory usage unsuitable for lightweight container environments.
+- **Why appropriate**: MongoDB aggregation pipelines calculate revenue, discounts, shipping, refunds, and AOV natively using integer minor units (paise: ₹1 = 100 paise), filtering only genuinely eligible confirmed/delivered orders and excluding abandoned or failed orders. Reports are streamed as standard RFC 4180 CSV strings and binary A4 PDFs using `pdfkit` (pure JavaScript, zero native dependencies), piping binary chunks directly to the HTTP response stream.
+- **Simpler alternative**: Client-side `window.print()` or headless Chrome/Puppeteer.
+- **Why alternative rejected**: `window.print()` produces unstyled, unpaginated browser printouts with inconsistent headers/margins. Headless Chrome requires 300MB+ dependencies, native C++ bindings, and significant RAM per request.
+
+### ADR-35: Production Containerization, Session Fixation Defense & Dynamic Frontend Code-Splitting
+- **Why we need it**: Production-grade isolation, repeatable deployments, protection against session hijacking, and fast initial customer page loads.
+- **Problem it solves**: Discrepancies between local development and cloud environments ("works on my machine"); session fixation and stale session exploitation after credential changes; and massive JavaScript bundles that degrade web vital scores.
+- **Why appropriate**:
+  1. **Container Topology**: Multi-stage Docker builds on minimal `node:20-alpine` and `nginx:alpine` images. Drops root permissions to run under `USER node`, configures SPA routing with 1-year asset cache headers, integrates automated container health probes, and implements a 10-second graceful drain protocol upon `SIGTERM`.
+  2. **Session Hardening**: Invokes `req.session.regenerate()` with `req.session.authTime = Date.now()` upon login and OTP verification. Records `user.passwordChangedAt` and dynamically rejects sessions issued prior to credential changes.
+  3. **Code-Splitting**: Replaces monolithic static imports with `React.lazy()` for all 14 administrative routes. Decreases the client customer bundle below 500 kB (490.63 kB / 144.60 kB gzip), isolating operations code strictly to authorized admin sessions.
+### ADR-36: AWS Production Deployment via Single EC2 Instance + Docker Compose, MongoDB Atlas, S3, and SES
+- **Why we need it**: A cost-effective, maintainable, beginner-friendly, and production-grade cloud deployment architecture for a modular monolith.
+- **Problem it solves**: Over-engineering production deployments with Kubernetes (EKS) or complex ECS/Fargate + Application Load Balancer setups introduces high monthly infrastructure costs ($50–$150+/mo), brittle networking configurations (ALB target groups, NAT Gateways, IAM execution roles), and unnecessary microservices abstractions.
+- **Why appropriate**:
+  1. **Compute (EC2 + Docker Compose)**: Running Docker Compose on Ubuntu 24.04 LTS (`t3.small` / `t4g.small`) offers estimated costs around ~$15–$22/month (depending on region, instance family, and public IPv4 charges under current AWS pricing) and executes the identical containerized images verified locally (`aurora-frontend` Nginx and `aurora-backend` Node.js). For the expected initial traffic of this portfolio project, a single EC2 instance keeps deployment simple; higher traffic would require load testing and potentially multiple instances behind an ALB.
+  2. **Database (MongoDB Atlas)**: Managed replica set with TLS encryption and network whitelisting restricted strictly to the EC2 Elastic IP. For production disaster recovery, dedicated tiers (M10+) provide automated cloud backups and point-in-time recovery (note: free M0 clusters do not include automated backup snapshots).
+  3. **Media Storage (AWS S3)**: Private S3 bucket with client direct-upload presigned URLs (`getPresignedUploadUrl`), preventing heavy binary images from consuming backend server bandwidth.
+  4. **Transactional Email (AWS SES)**: High-deliverability transactional emails for registration and password-reset OTPs via `@aws-sdk/client-ses`, with local console mock fallback.
+  5. **Reverse Proxy & SSL**: Nginx container handles HTTP-to-HTTPS 301 redirection, terminates TLS via Let's Encrypt / Certbot certificates, and proxies `/api/` traffic to the backend over internal Docker networking. Backend port 5000 is strictly blocked from the public internet.
+  6. **Deployment Workflow**: `scripts/deploy.sh` provides a health-checked deployment with rollback support, gating container replacement on backend readiness checks.
+- **Simpler alternative**: Deploying directly to a PaaS like Render or Heroku.
+- **Why alternative rejected**: PaaS deployments obscure cloud networking, security groups, TLS termination, and reverse proxy mechanics, reducing the educational value and portfolio impact for senior engineering interviews.
+
 ---
 
 ## 3. Verified Dependency Versions Audit
@@ -220,3 +289,10 @@ Every technical choice in this project follows a rigorous 5-point architectural 
 | `react-dom` | `^19.3.0` | React 19 DOM renderer. |
 | `vite` | `^8.3.0` | Upgraded to Vite 8 modern build toolchain. |
 | `@vitejs/plugin-react` | `^6.1.1` | React 19 fast refresh plugin for Vite 8. |
+| `pdfkit` | `^0.16.0` | Pure JavaScript PDF generation without native binary dependencies or headless browser overhead. |
+| `@aws-sdk/client-s3` | `^3.758.0` | AWS SDK v3 client for Amazon S3 object storage and presigned URL generation. |
+| `@aws-sdk/client-ses` | `^3.758.0` | AWS SDK v3 client for Amazon Simple Email Service transactional dispatch. |
+| `@aws-sdk/s3-request-presigner` | `^3.758.0` | Generates short-lived, cryptographically signed URLs for direct S3 client uploads. |
+
+
+

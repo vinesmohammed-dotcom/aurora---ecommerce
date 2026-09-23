@@ -47,6 +47,22 @@ const requireAuth = async (req, res, next) => {
       );
     }
 
+    if (user.passwordChangedAt && req.session.authTime) {
+      const sessionIssuedAt = new Date(req.session.authTime).getTime();
+      const passwordChangedAt = new Date(user.passwordChangedAt).getTime();
+      if (passwordChangedAt > sessionIssuedAt) {
+        req.session.destroy(() => {});
+        res.clearCookie("sessionId");
+        return next(
+          new AppError(
+            "Password was recently updated. Please log in again with your new credentials.",
+            HTTP_CODES.UNAUTHORIZED,
+            ERROR_CODES.UNAUTHORIZED
+          )
+        );
+      }
+    }
+
     if (!user.isVerified) {
       return next(
         new AppError(

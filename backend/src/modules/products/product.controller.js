@@ -93,11 +93,21 @@ const deleteVariant = asyncHandler(async (req, res) => {
   new ApiResponse(HTTP_CODES.OK, result.product, result.message).send(res);
 });
 
+/**
+ * Admin: Get inventory matrix
+ * GET /api/v1/admin/products/inventory
+ */
+const getInventoryAdmin = asyncHandler(async (req, res) => {
+  const result = await ProductService.getInventoryAdmin(req.query);
+  new ApiResponse(HTTP_CODES.OK, result, "Inventory fetched successfully.").send(res);
+});
+
 module.exports = {
   getPublicProducts,
   getPublicProductBySlug,
   getAdminProducts,
   getAdminProductById,
+  getInventoryAdmin,
   createProduct,
   updateProduct,
   toggleProductStatus,
@@ -105,3 +115,4 @@ module.exports = {
   addVariant,
   deleteVariant
 };
+

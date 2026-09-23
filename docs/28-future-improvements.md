@@ -27,7 +27,7 @@ Below is an exhaustive architectural review of the missing requirements, categor
 | **Payment Retry Engine** | When a customer's bank card fails or their internet drops mid-transaction, discarding their cart forces them to re-select items. Retrying payment on the existing order in `PAYMENT_FAILED` state drastically increases conversion. | **Should Have (v1.1)** | High |
 | **Webhook Idempotency & Signature Verification** | Razorpay webhooks can be delivered multiple times for a single event. Processing a payment webhook twice without an idempotency check could trigger duplicate order confirmations or double wallet credits. | **YES (MVP)** | High |
 | **Automated Tax Invoice Generation (PDF)** | Customers require proof of purchase; e-commerce regulations mandate GST/tax breakdown. Invoices are generated dynamically and stored in S3. | **Should Have (v1.1)** | Medium |
-| **Atomic Wallet Ledger** | Wallets must operate as double-entry immutable ledgers (`CREDIT`, `DEBIT`, `REFUND`), never as an un-audited raw number mutation. | **Should Have (v1.1)** | High |
+| **Atomic Wallet Ledger** | Wallet uses an immutable append-only transaction ledger with a materialized current balance. The balance consistency invariant is verified as total credits minus total debits. | **Should Have (v1.1)** | High |
 
 ### 2.3 UX, Lifecycle & State Management
 

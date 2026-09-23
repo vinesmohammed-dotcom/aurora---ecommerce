@@ -15,11 +15,37 @@ const apiRouter = require("./routes");
  */
 const app = express();
 
-// 1. Security Headers via Helmet
+// 1. Security Headers via Helmet with explicit Razorpay directives & HSTS
 app.use(
   helmet({
-    contentSecurityPolicy: env.isProduction ? undefined : false,
-    crossOriginEmbedderPolicy: false
+    contentSecurityPolicy: env.isProduction
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://checkout.razorpay.com"],
+            frameSrc: ["'self'", "https://api.razorpay.com", "https://checkout.razorpay.com"],
+            connectSrc: [
+              "'self'",
+              "https://api.razorpay.com",
+              "https://lumberjack.razorpay.com",
+              env.FRONTEND_URL
+            ],
+            imgSrc: ["'self'", "data:", "blob:", "https:"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com"],
+            objectSrc: ["'none'"],
+            upgradeInsecureRequests: []
+          }
+        }
+      : false,
+    crossOriginEmbedderPolicy: false,
+    hsts: env.isProduction
+      ? {
+          maxAge: 31536000,
+          includeSubDomains: true,
+          preload: true
+        }
+      : false
   })
 );
 
@@ -27,8 +53,8 @@ app.use(
 app.use(
   cors({
     origin: (origin, callback) => {
-      // In development, allow requests without origin (like Postman or curl) or matching FRONTEND_URL
-      if (!origin || origin === env.FRONTEND_URL || env.isDevelopment) {
+      // In development/test, allow requests without origin (like Postman/curl/supertest) or matching FRONTEND_URL
+      if (!origin || origin === env.FRONTEND_URL || env.isDevelopment || env.isTest) {
         callback(null, true);
       } else {
         callback(new Error(`CORS policy does not allow access from origin: ${origin}`));
@@ -36,12 +62,46 @@ app.use(
     },
     credentials: true, // Mandatory for session cookies
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Idempotency-Key",
+      "idempotency-key",
+      "x-razorpay-signature",
+      "x-razorpay-event-id"
+    ]
   })
 );
 
-// 3. Body Parsing Middleware with size limits
-app.use(express.json({ limit: "10kb" }));
+// 3. State-Changing CSRF & Origin Validation Guard (exempting public HMAC webhooks)
+app.use((req, res, next) => {
+  const isStateChanging = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+  const isPublicWebhook = req.originalUrl?.includes("/payments/webhook") || req.path?.includes("/payments/webhook");
+
+  if (isStateChanging && !isPublicWebhook && env.isProduction) {
+    const origin = req.headers.origin || (req.headers.referer ? new URL(req.headers.referer).origin : null);
+    if (origin && origin !== env.FRONTEND_URL) {
+      return res.status(403).json({
+        success: false,
+        message: "Cross-Site Request Forgery (CSRF) validation failed: untrusted origin.",
+        code: "CSRF_ORIGIN_MISMATCH",
+        errors: []
+      });
+    }
+  }
+  next();
+});
+
+// 3. Body Parsing Middleware with size limits & raw buffer capture for webhooks
+app.use(
+  express.json({
+    limit: "10kb",
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 
 // 4. Request Logging Middleware (sanitized)

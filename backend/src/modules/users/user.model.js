@@ -38,6 +38,10 @@ const userSchema = new mongoose.Schema(
     isBlocked: {
       type: Boolean,
       default: false
+    },
+    passwordChangedAt: {
+      type: Date,
+      default: null
     }
   },
   {

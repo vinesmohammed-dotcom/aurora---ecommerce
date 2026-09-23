@@ -4,6 +4,7 @@ import api from "../services/api";
 import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
+import { launchRazorpayModal } from "../utils/razorpay";
 
 export default function OrdersPage() {
   const location = useLocation();
@@ -14,6 +15,10 @@ export default function OrdersPage() {
   const [cancellingOrderId, setCancellingOrderId] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
+  const [retryingOrderId, setRetryingOrderId] = useState(null);
+  const [returningOrderId, setReturningOrderId] = useState(null);
+  const [returnReason, setReturnReason] = useState("");
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
 
   // Success alert from recent checkout navigation
   const [checkoutSuccess, setCheckoutSuccess] = useState(location.state?.justOrdered || false);
@@ -43,10 +48,45 @@ export default function OrdersPage() {
         return <Badge variant="info">Shipped</Badge>;
       case "DELIVERED":
         return <Badge variant="success">Delivered</Badge>;
+      case "RETURN_REQUESTED":
+        return <Badge variant="warning">Return Requested</Badge>;
+      case "RETURN_APPROVED":
+        return <Badge variant="info">Return Approved</Badge>;
+      case "RETURN_RECEIVED":
+        return <Badge variant="info">Return Received</Badge>;
+      case "RETURN_INSPECTED":
+        return <Badge variant="warning">Return Inspected</Badge>;
+      case "RETURN_REJECTED":
+        return <Badge variant="danger">Return Rejected</Badge>;
+      case "RETURNED":
+        return <Badge variant="neutral">Returned</Badge>;
       case "CANCELLED":
         return <Badge variant="danger">Cancelled</Badge>;
       default:
         return <Badge>{status}</Badge>;
+    }
+  };
+
+  const getPaymentStatusBadge = (status) => {
+    switch (status) {
+      case "COMPLETED":
+        return <Badge variant="success">Paid</Badge>;
+      case "PENDING":
+        return <Badge variant="warning">Pending</Badge>;
+      case "REFUND_REQUIRED":
+        return <Badge variant="danger">Refund Required</Badge>;
+      case "REFUND_PENDING":
+        return <Badge variant="warning">Refund Processing</Badge>;
+      case "REFUNDED":
+        return <Badge variant="info">Refunded</Badge>;
+      case "PARTIALLY_REFUNDED":
+        return <Badge variant="info">Partially Refunded</Badge>;
+      case "FAILED":
+        return <Badge variant="danger">Failed</Badge>;
+      case "EXPIRED":
+        return <Badge variant="neutral">Expired</Badge>;
+      default:
+        return <Badge variant="neutral">{status}</Badge>;
     }
   };
 
@@ -90,6 +130,77 @@ export default function OrdersPage() {
       alert(err.message || "Failed to cancel order.");
     } finally {
       setIsSubmittingCancel(false);
+    }
+  };
+
+  const isWithinReturnWindow = (order) => {
+    if (order.orderStatus !== "DELIVERED") return false;
+    const deliveredEntry = order.statusHistory?.slice().reverse().find((h) => h.status === "DELIVERED");
+    const deliveryDate = deliveredEntry ? new Date(deliveredEntry.changedAt) : new Date(order.updatedAt);
+    const daysSince = (Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24);
+    return daysSince <= 7;
+  };
+
+  const handleOpenReturnModal = (order) => {
+    setReturningOrderId(order._id);
+    setReturnReason("Defective or damaged item received");
+  };
+
+  const handleConfirmReturn = async () => {
+    if (!returningOrderId) return;
+    try {
+      setIsSubmittingReturn(true);
+      const res = await api.post(`/orders/${returningOrderId}/return`, {
+        reason: returnReason || "Customer requested return"
+      });
+
+      if (res.success) {
+        setReturningOrderId(null);
+        fetchOrders();
+      }
+    } catch (err) {
+      alert(err.message || "Failed to submit return request.");
+    } finally {
+      setIsSubmittingReturn(false);
+    }
+  };
+
+  const handleRetryPayment = async (order) => {
+    try {
+      setRetryingOrderId(order._id);
+      const res = await api.post("/payments/retry", { orderId: order._id });
+      if (!res.success || !res.data?.checkoutInfo) {
+        throw new Error(res.message || "Failed to initialize payment retry.");
+      }
+
+      const checkoutInfo = res.data.checkoutInfo;
+      await launchRazorpayModal({
+        checkoutInfo,
+        onSuccess: async (response) => {
+          try {
+            await api.post("/payments/verify", {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature
+            });
+            fetchOrders();
+          } catch (verifyErr) {
+            alert(verifyErr.message || "Payment verification failed.");
+            fetchOrders();
+          }
+        },
+        onFailure: (err) => {
+          alert(err?.error?.description || "Payment attempt declined.");
+          fetchOrders();
+        },
+        onDismiss: () => {
+          fetchOrders();
+        }
+      });
+    } catch (err) {
+      alert(err.message || "Payment retry encountered an issue.");
+    } finally {
+      setRetryingOrderId(null);
     }
   };
 
@@ -223,8 +334,9 @@ export default function OrdersPage() {
                     <div className="flex items-center gap-2 text-slate-600">
                       <span>Payment:</span>
                       <span className="font-semibold text-slate-800 uppercase">
-                        {order.paymentMethod} ({order.paymentStatus})
+                        {order.paymentMethod}
                       </span>
+                      {getPaymentStatusBadge(order.paymentStatus)}
                       {order.appliedCoupon && (
                         <Badge variant="info">
                           Coupon {order.appliedCoupon.code} (-{formatCurrency(order.appliedCoupon.discountAmount)})
@@ -233,6 +345,41 @@ export default function OrdersPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {order.paymentMethod === "ONLINE_RAZORPAY" &&
+                        order.paymentStatus !== "COMPLETED" &&
+                        order.orderStatus !== "CANCELLED" && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleRetryPayment(order)}
+                            isLoading={retryingOrderId === order._id}
+                            className="bg-indigo-600 hover:bg-indigo-700"
+                          >
+                            ⚡ Retry Payment
+                          </Button>
+                        )}
+
+                      {order.orderStatus === "DELIVERED" &&
+                        isWithinReturnWindow(order) &&
+                        (!order.returnRequest || order.returnRequest.status === "NONE" || order.returnRequest.status === "REJECTED") && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleOpenReturnModal(order)}
+                            className="text-amber-700 hover:text-amber-800 border-amber-300 bg-amber-50/50"
+                          >
+                            ↩ Request Return
+                          </Button>
+                        )}
+
+                      {order.returnRequest && order.returnRequest.status === "REQUESTED" && (
+                        <Badge variant="warning">Return Pending Review</Badge>
+                      )}
+
+                      {order.returnRequest && order.returnRequest.status === "APPROVED" && (
+                        <Badge variant="info">Return Approved</Badge>
+                      )}
+
                       <Button
                         variant="secondary"
                         size="sm"
@@ -396,6 +543,49 @@ export default function OrdersPage() {
                 disabled={isSubmittingCancel}
               >
                 {isSubmittingCancel ? "Cancelling..." : "Confirm Cancellation"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return Request Modal */}
+      {returningOrderId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+            <h3 className="text-lg font-bold text-slate-900 font-heading">Request Return</h3>
+            <p className="text-xs text-slate-500">
+              Orders delivered within the last 7 days are eligible for return review. Please provide a reason for the return.
+            </p>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Return Reason</label>
+              <textarea
+                value={returnReason}
+                onChange={(e) => setReturnReason(e.target.value)}
+                placeholder="Describe the reason for returning this order..."
+                rows={3}
+                className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setReturningOrderId(null)}
+                disabled={isSubmittingReturn}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleConfirmReturn}
+                disabled={isSubmittingReturn || !returnReason.trim()}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                {isSubmittingReturn ? "Submitting..." : "Submit Return Request"}
               </Button>
             </div>
           </div>

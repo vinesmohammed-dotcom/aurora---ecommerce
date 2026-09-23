@@ -29,6 +29,9 @@ export default function Navbar() {
           <Link to="/orders" className="hover:text-slate-900 transition-colors">
             Orders
           </Link>
+          <Link to="/wallet" className="hover:text-slate-900 transition-colors">
+            Wallet
+          </Link>
           {user?.role === "ADMIN" && (
             <Link to="/admin" className="text-emerald-600 hover:text-emerald-700 font-semibold">
               Admin Portal

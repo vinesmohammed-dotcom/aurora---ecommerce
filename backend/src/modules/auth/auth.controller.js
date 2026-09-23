@@ -19,10 +19,20 @@ const register = asyncHandler(async (req, res) => {
 const verifyOtp = asyncHandler(async (req, res) => {
   const result = await AuthService.verifyOtp(req.body);
 
-  // If verifying registration, establish session immediately
+  // If verifying registration, establish session with fixation protection
   if (result.user) {
-    req.session.userId = result.user._id;
-    req.session.role = result.user.role;
+    return req.session.regenerate((err) => {
+      if (err) {
+        return next(err);
+      }
+      req.session.userId = result.user._id;
+      req.session.role = result.user.role;
+      req.session.authTime = Date.now();
+      req.session.save((saveErr) => {
+        if (saveErr) return next(saveErr);
+        new ApiResponse(HTTP_CODES.OK, result, result.message || "OTP verified successfully.").send(res);
+      });
+    });
   }
 
   new ApiResponse(HTTP_CODES.OK, result, result.message || "OTP verified successfully.").send(res);
@@ -32,14 +42,25 @@ const verifyOtp = asyncHandler(async (req, res) => {
  * Login user
  * POST /api/v1/auth/login
  */
-const login = asyncHandler(async (req, res) => {
+const login = asyncHandler(async (req, res, next) => {
   const user = await AuthService.login(req.body);
 
-  // Establish server session
-  req.session.userId = user._id;
-  req.session.role = user.role;
+  // Defend against session fixation: generate fresh session ID and destroy pre-auth session
+  req.session.regenerate((err) => {
+    if (err) {
+      return next(err);
+    }
+    req.session.userId = user._id;
+    req.session.role = user.role;
+    req.session.authTime = Date.now();
 
-  new ApiResponse(HTTP_CODES.OK, { user }, "Logged in successfully.").send(res);
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        return next(saveErr);
+      }
+      new ApiResponse(HTTP_CODES.OK, { user }, "Logged in successfully.").send(res);
+    });
+  });
 });
 
 /**

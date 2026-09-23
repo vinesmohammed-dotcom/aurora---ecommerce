@@ -18,26 +18,35 @@ const getLivenessStatus = (req, res) => {
   new ApiResponse(HTTP_CODES.OK, livenessData, "Process is alive and healthy").send(res);
 };
 
+let isShuttingDown = false;
+
+const setShuttingDown = (flag) => {
+  isShuttingDown = Boolean(flag);
+};
+
 /**
  * Dependency Readiness Endpoint: GET /api/v1/health/ready
  * Verifies that the application's critical backing services (MongoDB) are reachable
- * and ready to serve live production traffic.
+ * and ready to serve live production traffic. Returns 503 during graceful shutdown.
  */
 const getReadinessStatus = (req, res) => {
   const dbStatus = getDBStatus();
-  const isReady = dbStatus === "connected";
+  const isReady = dbStatus === "connected" && !isShuttingDown;
 
   const readinessData = {
-    status: isReady ? "ready" : "not_ready",
+    status: isShuttingDown ? "shutting_down" : isReady ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
-    database: dbStatus
+    database: dbStatus,
+    shuttingDown: isShuttingDown
   };
 
   if (!isReady) {
     return new ApiResponse(
       HTTP_CODES.SERVICE_UNAVAILABLE,
       readinessData,
-      "Service is not ready: database connection is unavailable"
+      isShuttingDown
+        ? "Service is shutting down and draining connections"
+        : "Service is not ready: database connection is unavailable"
     ).send(res);
   }
 
@@ -46,5 +55,6 @@ const getReadinessStatus = (req, res) => {
 
 module.exports = {
   getLivenessStatus,
-  getReadinessStatus
+  getReadinessStatus,
+  setShuttingDown
 };

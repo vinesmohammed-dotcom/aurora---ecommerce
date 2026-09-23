@@ -10,6 +10,7 @@ import Product from "../src/modules/products/product.model";
 import Cart from "../src/modules/cart/cart.model";
 import Address from "../src/modules/addresses/address.model";
 import Order from "../src/modules/orders/order.model";
+import Coupon from "../src/modules/coupons/coupon.model";
 
 describe("Phase 5 — Orders, COD Checkout, State Machine & Idempotency (Integration Tests)", () => {
   let userACookie;
@@ -348,6 +349,150 @@ describe("Phase 5 — Orders, COD Checkout, State Machine & Idempotency (Integra
 
       expect(res.status).toBe(400);
       expect(res.body.message).toContain("Invalid status transition");
+    });
+  });
+
+  describe("MongoDB Multi-Document Transaction Rollback on Multi-Item Failure", () => {
+    it("Rolls back Item A stock, cart, coupon usage, and creates NO order when Item B fails due to insufficient stock", async () => {
+      // 1. Setup products: Product 1 has stock 10, Product 2 has stock 1
+      await Product.updateOne(
+        { _id: product1Id, "variants._id": variant1Id },
+        { $set: { "variants.$.stock": 10 } }
+      );
+      await Product.updateOne(
+        { _id: product2Id, "variants._id": variant2Id },
+        { $set: { "variants.$.stock": 1 } }
+      );
+
+      // 2. Setup Coupon with usedCount 0
+      const future = new Date();
+      future.setDate(future.getDate() + 10);
+      await Coupon.deleteOne({ code: "TXROLLBACK" });
+      await Coupon.create({
+        code: "TXROLLBACK",
+        discountType: "FLAT",
+        discountValue: 50,
+        minOrderValue: 500,
+        expiryDate: future,
+        usageLimit: 10,
+        perUserLimit: 1,
+        usedCount: 0,
+        isActive: true
+      });
+
+      // 3. Clear cart and add Item A (quantity 2) and Item B (quantity 3 - EXCEEDS stock of 1!)
+      await Cart.updateOne({ userId: userAId }, { $set: { items: [] } });
+
+      await request(app)
+        .post("/api/v1/cart/items")
+        .set("Cookie", userACookie)
+        .send({ productId: product1Id, variantId: variant1Id, quantity: 2 });
+
+      // Directly put quantity 3 in cart for Item B to bypass preliminary cart addition check
+      await Cart.updateOne(
+        { userId: userAId },
+        {
+          $push: {
+            items: {
+              productId: product2Id,
+              variantId: variant2Id,
+              quantity: 3
+            }
+          }
+        }
+      );
+
+      const orderCountBefore = await Order.countDocuments({ userId: userAId });
+
+      // 4. Attempt order placement with coupon
+      const res = await request(app)
+        .post("/api/v1/orders/checkout/cod")
+        .set("Cookie", userACookie)
+        .send({
+          addressId: addressAId,
+          couponCode: "TXROLLBACK"
+        });
+
+      // Must fail with 400 Insufficient Stock
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain("Insufficient stock");
+
+      // 5. TRANSACTION ROLLBACK ASSERTIONS:
+      // A: Zero order documents created
+      const orderCountAfter = await Order.countDocuments({ userId: userAId });
+      expect(orderCountAfter).toBe(orderCountBefore);
+
+      // B: Item A stock remains 10 (Item A succeeded inside tx, but rolled back!)
+      const prodA = await Product.findById(product1Id);
+      expect(prodA.variants.id(variant1Id).stock).toBe(10);
+
+      // C: Item B stock remains 1
+      const prodB = await Product.findById(product2Id);
+      expect(prodB.variants.id(variant2Id).stock).toBe(1);
+
+      // D: Cart items remain in user's cart (NOT cleared!)
+      const userCart = await Cart.findOne({ userId: userAId });
+      expect(userCart.items.length).toBe(2);
+
+      // E: Coupon usedCount remains 0 (NOT incremented!)
+      const coupon = await Coupon.findOne({ code: "TXROLLBACK" });
+      expect(coupon.usedCount).toBe(0);
+      expect(coupon.userUsage.length).toBe(0);
+    });
+  });
+
+  describe("Durable Database-Backed Idempotency", () => {
+    it("Durable idempotency key scoped to userId returns existing order and never duplicates", async () => {
+      // 1. Setup user cart with 1 valid item
+      await Cart.updateOne({ userId: userAId }, { $set: { items: [] } });
+      await Product.updateOne(
+        { _id: product1Id, "variants._id": variant1Id },
+        { $set: { "variants.$.stock": 10 } }
+      );
+
+      await request(app)
+        .post("/api/v1/cart/items")
+        .set("Cookie", userACookie)
+        .send({ productId: product1Id, variantId: variant1Id, quantity: 1 });
+
+      const idempotencyKey = "durable-key-" + Date.now();
+
+      // First submission
+      const res1 = await request(app)
+        .post("/api/v1/orders/checkout/cod")
+        .set("Cookie", userACookie)
+        .set("Idempotency-Key", idempotencyKey)
+        .send({ addressId: addressAId });
+
+      expect(res1.status).toBe(201);
+      const firstOrder = res1.body.data.order;
+      expect(firstOrder.orderNumber).toBeDefined();
+
+      // Stock was decremented from 10 to 9
+      const prodAfterFirst = await Product.findById(product1Id);
+      expect(prodAfterFirst.variants.id(variant1Id).stock).toBe(9);
+
+      // Second submission with exact same key (simulating retry / double click)
+      const res2 = await request(app)
+        .post("/api/v1/orders/checkout/cod")
+        .set("Cookie", userACookie)
+        .set("Idempotency-Key", idempotencyKey)
+        .send({ addressId: addressAId });
+
+      expect([200, 201]).toContain(res2.status);
+      const secondOrder = res2.body.data.order;
+
+      // Must return identical order
+      expect(secondOrder._id).toBe(firstOrder._id);
+      expect(secondOrder.orderNumber).toBe(firstOrder.orderNumber);
+
+      // Stock is NOT decremented again (remains 9!)
+      const prodAfterSecond = await Product.findById(product1Id);
+      expect(prodAfterSecond.variants.id(variant1Id).stock).toBe(9);
+
+      // Total orders in DB for this key is exactly 1
+      const matchingOrders = await Order.countDocuments({ userId: userAId, idempotencyKey });
+      expect(matchingOrders).toBe(1);
     });
   });
 });

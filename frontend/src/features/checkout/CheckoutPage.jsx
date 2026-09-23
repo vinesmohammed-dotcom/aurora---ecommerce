@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import api from "../../services/api";
 import { setCartItemCount } from "../../store/slices/cartSlice";
+import { launchRazorpayModal } from "../../utils/razorpay";
 import Button from "../../components/ui/Button";
 import Card from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
@@ -23,6 +24,7 @@ export default function CheckoutPage() {
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [pageError, setPageError] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("ONLINE_RAZORPAY");
 
   // Generate unique idempotency key once per checkout session
   const [idempotencyKey] = useState(() => `idemp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
@@ -152,16 +154,70 @@ export default function CheckoutPage() {
 
       if (res.success && res.data?.order) {
         dispatch(setCartItemCount(0));
-        navigate("/orders", {
-          state: {
-            justOrdered: true,
-            orderNumber: res.data.order.orderNumber,
-            grandTotal: res.data.order.priceSummary.grandTotal
-          }
-        });
+        navigate(`/payment-success?orderId=${res.data.order._id}`);
       }
     } catch (err) {
       setPageError(err.message || "Order placement failed. Please try again.");
+    } finally {
+      setIsPlacingOrder(false);
+    }
+  };
+
+  const handlePlaceOrder = async () => {
+    if (!selectedAddressId) {
+      alert("Please select or add a delivery address.");
+      return;
+    }
+
+    if (paymentMethod === "COD") {
+      return handlePlaceCodOrder();
+    }
+
+    try {
+      setIsPlacingOrder(true);
+      setPageError("");
+
+      const res = await api.post("/payments/create", {
+        addressId: selectedAddressId,
+        couponCode: appliedCouponCode || undefined,
+        idempotencyKey
+      });
+
+      if (!res.success || !res.data?.checkoutInfo) {
+        throw new Error(res.message || "Failed to initialize payment session.");
+      }
+
+      const checkoutInfo = res.data.checkoutInfo;
+
+      await launchRazorpayModal({
+        checkoutInfo,
+        onSuccess: async (response) => {
+          try {
+            const verifyRes = await api.post("/payments/verify", {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature
+            });
+
+            if (verifyRes.success) {
+              dispatch(setCartItemCount(0));
+              navigate(`/payment-success?orderId=${checkoutInfo.orderId}&paymentId=${response.razorpay_payment_id}`);
+            } else {
+              navigate(`/payment-failure?orderId=${checkoutInfo.orderId}&reason=${encodeURIComponent("Payment signature verification failed.")}`);
+            }
+          } catch (verifyErr) {
+            navigate(`/payment-failure?orderId=${checkoutInfo.orderId}&reason=${encodeURIComponent(verifyErr.message || "Verification failed.")}`);
+          }
+        },
+        onFailure: (errResponse) => {
+          navigate(`/payment-failure?orderId=${checkoutInfo.orderId}&reason=${encodeURIComponent(errResponse?.error?.description || "Payment attempt declined.")}`);
+        },
+        onDismiss: () => {
+          navigate(`/payment-failure?orderId=${checkoutInfo.orderId}&reason=${encodeURIComponent("Payment modal closed before completing transaction.")}`);
+        }
+      });
+    } catch (err) {
+      setPageError(err.message || "Payment initiation failed. Please try again.");
     } finally {
       setIsPlacingOrder(false);
     }
@@ -340,18 +396,61 @@ export default function CheckoutPage() {
               <h2 className="text-lg font-bold text-slate-900 font-heading">Payment Method</h2>
             </div>
 
-            <div className="rounded-xl border-2 border-indigo-600 bg-indigo-50/20 p-4 flex items-start justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">💵</span>
-                  <span className="font-bold text-slate-900 text-sm">Cash on Delivery (COD)</span>
-                  <Badge variant="info">Phase 5 Enabled</Badge>
+            <div className="space-y-3">
+              {/* Option 1: Razorpay Online Payment */}
+              <div
+                onClick={() => setPaymentMethod("ONLINE_RAZORPAY")}
+                className={`cursor-pointer rounded-xl border p-4 transition-all flex items-start justify-between ${
+                  paymentMethod === "ONLINE_RAZORPAY"
+                    ? "border-indigo-600 bg-indigo-50/40 shadow-sm ring-1 ring-indigo-500"
+                    : "border-slate-200 hover:border-slate-300 bg-white"
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">⚡</span>
+                    <span className="font-bold text-slate-900 text-sm">Online Payment (Razorpay)</span>
+                    <Badge variant="success">Recommended</Badge>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Pay securely using UPI, Credit/Debit Cards, or NetBanking. Instant verification and guaranteed stock reservation.
+                  </p>
                 </div>
-                <p className="text-xs text-slate-600">
-                  Pay securely using cash or contactless UPI QR code when your shipment arrives at your doorstep.
-                </p>
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  checked={paymentMethod === "ONLINE_RAZORPAY"}
+                  onChange={() => setPaymentMethod("ONLINE_RAZORPAY")}
+                  className="h-4 w-4 text-indigo-600 mt-1"
+                />
               </div>
-              <input type="radio" checked readOnly className="h-4 w-4 text-indigo-600 mt-1" />
+
+              {/* Option 2: Cash on Delivery */}
+              <div
+                onClick={() => setPaymentMethod("COD")}
+                className={`cursor-pointer rounded-xl border p-4 transition-all flex items-start justify-between ${
+                  paymentMethod === "COD"
+                    ? "border-indigo-600 bg-indigo-50/40 shadow-sm ring-1 ring-indigo-500"
+                    : "border-slate-200 hover:border-slate-300 bg-white"
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">💵</span>
+                    <span className="font-bold text-slate-900 text-sm">Cash on Delivery (COD)</span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Pay cash or scan courier contactless UPI QR code when your shipment arrives at your doorstep.
+                  </p>
+                </div>
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  checked={paymentMethod === "COD"}
+                  onChange={() => setPaymentMethod("COD")}
+                  className="h-4 w-4 text-indigo-600 mt-1"
+                />
+              </div>
             </div>
           </Card>
         </div>
@@ -466,11 +565,16 @@ export default function CheckoutPage() {
               <Button
                 type="button"
                 variant="primary"
-                onClick={handlePlaceCodOrder}
+                onClick={handlePlaceOrder}
                 disabled={isPlacingOrder || addresses.length === 0}
-                className="w-full justify-center py-3 text-sm font-bold shadow-md shadow-indigo-200"
+                isLoading={isPlacingOrder}
+                className="w-full justify-center py-3.5 text-sm font-bold shadow-md shadow-indigo-200"
               >
-                {isPlacingOrder ? "Placing Order..." : "Place Order (Cash on Delivery)"}
+                {isPlacingOrder
+                  ? "Processing..."
+                  : paymentMethod === "ONLINE_RAZORPAY"
+                  ? "Proceed to Online Payment"
+                  : "Place Order (Cash on Delivery)"}
               </Button>
               <p className="mt-2 text-center text-[11px] text-slate-400">
                 🔒 Safe & encrypted checkout • Authoritative catalog verification

@@ -13,31 +13,38 @@ When an order is created, the server writes a **complete, frozen snapshot** into
 ```javascript
 {
   orderNumber: "ORD-2026-88129",
-  user: ObjectId("..."),
+  userId: ObjectId("..."),
   items: [
     {
-      product: ObjectId("64f1a..."),     // For tracking/reference
-      productName: "Nike Air Max 90",    // Frozen title
-      sku: "NK-AIR90-WHT-09",            // Frozen SKU
+      productId: ObjectId("64f1a..."),
+      variantId: ObjectId("64f1b..."),
+      sku: "NK-AIR90-WHT-09",
+      name: "Nike Air Max 90",
+      slug: "nike-air-max-90",
+      image: "https://res.cloudinary.com/...",
       attributes: { color: "White", size: "9" },
-      price: 4999,                       // Frozen purchase price
+      unitPrice: 4999,
+      discountedUnitPrice: 4499,
       quantity: 1,
-      subtotal: 4999
+      itemTotal: 4499
     }
   ],
-  shippingAddress: {                     // Frozen shipping destination
+  shippingAddress: {
     fullName: "Vinesh Kumar",
     phone: "9876543210",
-    street: "Flat 4B, Emerald Towers",
+    addressLine1: "Flat 4B, Emerald Towers",
     city: "Bengaluru",
     state: "Karnataka",
-    pincode: "560001"
+    postalCode: "560001",
+    country: "India"
   },
-  pricing: {
-    itemsSubtotal: 4999,
-    discountAmount: 500,
-    couponCode: "WELCOME10",
-    finalPayable: 4499
+  priceSummary: {
+    grossSubtotal: 4999,
+    offerDiscountTotal: 500,
+    netSubtotal: 4499,
+    couponDiscount: 0,
+    shippingFee: 0,
+    grandTotal: 4499
   }
 }
 ```
@@ -45,61 +52,113 @@ Even if the product is deleted, renamed, or repriced, the order record remains a
 
 ---
 
-## 2. Order State Machine
+## 2. Separation of Concerns: Order Status vs. Payment Status
+
+> [!IMPORTANT]
+> **Strict Domain Boundary**
+> - **`orderStatus`**: Fulfillment and logistical state of the physical goods (`PENDING`, `CONFIRMED`, `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`, `RETURN_REQUESTED`, `RETURN_APPROVED`, `RETURN_REJECTED`, `RETURNED`).
+> - **`paymentStatus`**: Financial state of the transaction (`PENDING`, `COMPLETED`, `FAILED`, `EXPIRED`, `REFUND_REQUIRED`, `REFUND_PENDING`, `REFUNDED`, `PARTIALLY_REFUNDED`).
+> 
+> A payment refund never changes an order's physical history; it updates `paymentStatus` and creates an audited `Refund` entity.
+
+---
+
+## 3. Order State Machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING_PAYMENT : Online Payment Checkout
-    [*] --> CONFIRMED : COD or 100% Wallet Payment
+    [*] --> PENDING : Online Checkout Initiated (Upfront Stock Reserved)
+    [*] --> CONFIRMED : COD Order Placed
 
-    PENDING_PAYMENT --> CONFIRMED : Payment Verified (Razorpay Signature / Webhook)
-    PENDING_PAYMENT --> PAYMENT_FAILED : Payment Declined or Window Closed
-    
-    PAYMENT_FAILED --> PENDING_PAYMENT : Customer Clicks "Retry Payment"
-    PAYMENT_FAILED --> CANCELLED : 24h Expiry / User Abandoned (Stock Restored)
+    PENDING --> CONFIRMED : Online Payment Captured (Verify API / Webhook)
+    PENDING --> CANCELLED : 15-Minute Reservation Expired (Stock Released)
 
-    CONFIRMED --> PROCESSING : Admin Accepts & Commences Packing
-    CONFIRMED --> CANCELLED : Customer Cancels (Stock Restored, Auto-Refund)
+    CONFIRMED --> PROCESSING : Admin Commences Warehouse Packing
+    CONFIRMED --> CANCELLED : Customer Cancels (Stock Restored, Refund Triggered)
 
-    PROCESSING --> SHIPPED : Dispatch with Courier Tracking
-    PROCESSING --> CANCELLED : Admin Cancellation (OOS / Damaged, Refunded)
+    PROCESSING --> SHIPPED : Dispatched with Courier Tracking
+    PROCESSING --> CANCELLED : Warehouse Cancellation (Stock Restored)
 
     SHIPPED --> DELIVERED : Successful Delivery Confirmation
-    SHIPPED --> RETURN_REQUESTED : Delivery Refused / RTO
+    
+    DELIVERED --> RETURN_REQUESTED : Customer Files Return (Within 7-Day Window)
+    DELIVERED --> [*] : Return Window Expired (Terminal)
 
-    DELIVERED --> RETURN_REQUESTED : Customer Files Return (Within 7 Days)
-    DELIVERED --> [*] : Return Window Expired (Closed)
+    RETURN_REQUESTED --> RETURN_APPROVED : Admin Approves Return (Authorization Only - No Stock Restored!)
+    RETURN_REQUESTED --> RETURN_REJECTED : Admin Rejects Return (Reverts to DELIVERED)
 
-    RETURN_REQUESTED --> RETURNED : Item Picked Up & Inspected
-    RETURN_REQUESTED --> DELIVERED : Admin Rejects Return Request (with reason)
+    RETURN_APPROVED --> RETURN_RECEIVED : Physical Package Delivered to Warehouse
+    
+    RETURN_RECEIVED --> RETURN_INSPECTED : Warehouse Staff Inspects Item
+    note right of RETURN_INSPECTED
+      If passed & restock: variant stock restored to catalog
+      If damaged: stock NOT restored
+    end note
 
-    RETURNED --> REFUNDED : Quality Passed (Funds Credited to Wallet)
-    REFUNDED --> [*]
+    RETURN_INSPECTED --> RETURNED : Gateway Refund Processed (paymentStatus: REFUNDED)
+    RETURNED --> [*]
     CANCELLED --> [*]
 ```
 
 ---
 
-## 3. Allowed vs Forbidden State Transitions
+## 4. Return Workflow & 7-Day Window Policy
+
+### 4.1 Return Eligibility Policy
+1. Order must be in `DELIVERED` status.
+2. Delivery timestamp (`statusHistory` DELIVERED changedAt or order `updatedAt`) must be within **7 calendar days** (`ORDER_RETURN_WINDOW_DAYS = 7`).
+3. Order must not already have an active return request.
+
+### 4.2 Multi-Stage Return Workflow & ADR-33 Inventory Timing
+> [!IMPORTANT]
+> **Stock is NEVER restored upon return approval.**
+> Approval is merely administrative permission for the customer to ship the package back. Restoring stock upon approval creates phantom inventory that can be purchased by other customers before physical receipt, or when the returned product arrives broken/unusable.
+
+1. **Customer Return Filing**: `POST /api/v1/orders/:id/return`
+   - Customer supplies return `reason`.
+   - Transitions `orderStatus = "RETURN_REQUESTED"`.
+   - Sets `returnRequest = { status: "REQUESTED", reason, requestedAt: new Date() }`.
+2. **Admin Return Review**: `POST /api/v1/admin/orders/:id/return/review`
+   - Admin provides `decision` (`APPROVED` | `REJECTED`) and notes.
+   - **If APPROVED**: Transitions `orderStatus = "RETURN_APPROVED"`. Sets `returnRequest.status = "APPROVED"`. If payment was captured, sets `paymentStatus = "REFUND_PENDING"`. **Zero stock is restored at this stage.** Emits `ADMIN_APPROVED_RETURN` audit log.
+   - **If REJECTED**: Reverts `orderStatus = "DELIVERED"`. Sets `returnRequest.status = "REJECTED"`, recording `rejectionReason`. Emits `ADMIN_REJECTED_RETURN` audit log.
+3. **Physical Receipt at Warehouse**: `POST /api/v1/admin/orders/:id/return/receive`
+   - Order transitions from `RETURN_APPROVED` to `RETURN_RECEIVED`.
+   - Verifies package arrived at warehouse facility.
+4. **Warehouse Inspection Gate**: `POST /api/v1/admin/orders/:id/return/inspect`
+   - Admin submits `inspectionPassed` (boolean), `restock` (boolean), and `notes`.
+   - Transitions `orderStatus = "RETURN_INSPECTED"`.
+   - Sets `order.inspectionDetails = { inspectedAt: new Date(), inspectedBy: adminId, passed, restocked, notes }`.
+   - **Sellable Inventory Restoration Rule**: Variant stock is restored to the catalog (`StockService.restoreVariantStock`) **strictly if and only if** `inspectionPassed === true` AND `restock === true` AND `!order.inventoryRestored`.
+   - Sets `order.inventoryRestored = true` to guard against duplicate inventory restoration.
+   - If the item is damaged (`inspectionPassed: false`), stock is **NOT** restored to sellable inventory.
+5. **Gateway Refund Settlement**: `POST /api/v1/refunds`
+   - Admin issues gateway refund against captured payment.
+   - Transitions order from `RETURN_INSPECTED` to terminal `RETURNED`, and `paymentStatus` to `REFUNDED`.
+
+---
+
+## 5. Allowed vs Forbidden State Transitions
 
 | From State | Allowed Target State | Trigger / Actor | Business Side-Effects |
 | :--- | :--- | :--- | :--- |
-| `PENDING_PAYMENT` | `CONFIRMED` | Gateway Webhook / Verify API | Stock permanently reserved, payment marked `COMPLETED`. |
-| `PENDING_PAYMENT` | `PAYMENT_FAILED` | Gateway Webhook / Modal Dismiss | Order held in failed state for retry. |
-| `PAYMENT_FAILED` | `PENDING_PAYMENT` | Customer "Retry Payment" | Generates fresh Razorpay order ID. |
-| `PAYMENT_FAILED` | `CANCELLED` | Automated TTL / Customer | Releases reserved inventory back to catalog. |
+| `PENDING` | `CONFIRMED` | Gateway Webhook / Verify API | Payment marked `COMPLETED`. |
+| `PENDING` | `CANCELLED` | Sweeper TTL (15m) / Customer | Releases reserved stock back to catalog. `paymentStatus` marked `EXPIRED`. |
 | `CONFIRMED` | `PROCESSING` | Admin | Warehouse begins packing. Cancellation window still open. |
-| `CONFIRMED` | `CANCELLED` | Customer or Admin | Immediate atomic stock increment (`+qty`). If paid online/wallet, trigger auto-refund to user wallet. |
+| `CONFIRMED` | `CANCELLED` | Customer or Admin | Immediate atomic stock increment (`+qty`). If online payment captured, triggers gateway refund. |
 | `PROCESSING` | `SHIPPED` | Admin | Attaches courier tracking number. Customer cancellation disabled. |
-| `PROCESSING` | `CANCELLED` | Admin Only | Stock restored, wallet refund issued. |
-| `SHIPPED` | `DELIVERED` | Admin / Courier Webhook | Sets `deliveredAt = Date.now()`. Starts 7-day return countdown. |
+| `PROCESSING` | `CANCELLED` | Admin Only | Stock restored, gateway refund processed. |
+| `SHIPPED` | `DELIVERED` | Admin / Courier Delivery | Starts 7-day return countdown. |
 | `DELIVERED` | `RETURN_REQUESTED` | Customer | Checks `Date.now() - deliveredAt <= 7 days`. Records return reason. |
-| `RETURN_REQUESTED`| `RETURNED` | Admin | Confirms item arrival at warehouse. |
-| `RETURN_REQUESTED`| `DELIVERED` | Admin | Rejects return (e.g., damaged by user, tag removed). |
-| `RETURNED` | `REFUNDED` | Admin / System | Issues 100% refund transaction to customer's wallet. |
+| `RETURN_REQUESTED` | `RETURN_APPROVED` | Admin | Authorizes return. Zero stock restored. Sets `paymentStatus: REFUND_PENDING`. |
+| `RETURN_REQUESTED` | `DELIVERED` | Admin | Rejects return (e.g., policy violation, expired window). |
+| `RETURN_APPROVED` | `RETURN_RECEIVED` | Admin | Package arrived at warehouse. |
+| `RETURN_RECEIVED` | `RETURN_INSPECTED` | Admin | Inspects goods. Restores stock only if passed and restock=true. |
+| `RETURN_INSPECTED` | `RETURNED` | Refund Service | Gateway refund processed back to customer's original funding source. |
 
 ### Strictly Forbidden Transitions (Enforced by OrderService)
 - `SHIPPED` → `CANCELLED` *(Package is in transit; customer must request return after delivery)*
 - `DELIVERED` → `CANCELLED` *(Item already handed over; must follow formal return workflow)*
+- `RETURN_APPROVED` → `RETURNED` *(Must pass RETURN_RECEIVED and RETURN_INSPECTED before settlement)*
 - `CANCELLED` → `CONFIRMED` *(A cancelled order cannot be resurrected; user must place a new order)*
-- `REFUNDED` → `*` *(Terminal state; no further mutations permitted)*
+- `RETURNED` → `*` *(Terminal state; fulfillment concluded)*

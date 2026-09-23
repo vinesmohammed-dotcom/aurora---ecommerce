@@ -243,6 +243,7 @@ class AuthService {
 
     // 2. Hash and update password
     user.passwordHash = await User.hashPassword(newPassword);
+    user.passwordChangedAt = new Date();
     await user.save();
 
     // 3. Invalidate active sessions for this user in MongoDB sessions collection
@@ -281,9 +282,20 @@ class AuthService {
     }
 
     user.passwordHash = await User.hashPassword(newPassword);
+    user.passwordChangedAt = new Date();
     await user.save();
 
-    return { message: "Password updated successfully." };
+    // Invalidate other sessions in MongoDB
+    try {
+      if (mongoose.connection.readyState === 1) {
+        const sessionsCollection = mongoose.connection.collection("sessions");
+        await sessionsCollection.deleteMany({ session: new RegExp(user._id.toString()) });
+      }
+    } catch (err) {
+      console.warn("[Session Revocation Notice] Could not invalidate existing sessions:", err.message);
+    }
+
+    return { message: "Password updated successfully. Please log in again with your new credentials." };
   }
 
   /**

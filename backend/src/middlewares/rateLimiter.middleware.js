@@ -59,8 +59,48 @@ const otpLimiter = rateLimit({
   }
 });
 
+/**
+ * Rate Limiter for Online Payment Operations (create, verify, retry)
+ * Defends against checkout spam and signature verification flooding.
+ */
+const paymentLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.isDevelopment || env.isTest ? 500 : 30, // 30 requests per 15 min in production
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(HTTP_CODES.TOO_MANY_REQUESTS).json({
+      success: false,
+      message: "Too many payment operations requested. Please wait a few minutes before retrying.",
+      code: ERROR_CODES.RATE_LIMIT_EXCEEDED,
+      errors: []
+    });
+  }
+});
+
+/**
+ * High-Capacity Rate Limiter for Gateway Webhooks
+ * Permits burst webhook deliveries while preventing denial of service.
+ */
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: env.isDevelopment || env.isTest ? 1000 : 120, // 120 webhooks per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(HTTP_CODES.TOO_MANY_REQUESTS).json({
+      success: false,
+      message: "Webhook rate limit exceeded.",
+      code: ERROR_CODES.RATE_LIMIT_EXCEEDED,
+      errors: []
+    });
+  }
+});
+
 module.exports = {
   apiRateLimiter,
   authLimiter,
-  otpLimiter
+  otpLimiter,
+  paymentLimiter,
+  webhookLimiter
 };
