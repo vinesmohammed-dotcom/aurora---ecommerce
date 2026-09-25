@@ -6,15 +6,15 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
 ---
 
 ## 2. Current Status
-- **Current Status**: **Production deployment prepared; application code locally verified; container and AWS deployment not yet verified.**
-- **Phase 10 Status**: **Phase 10 implementation and verification audit complete. AWS deployment remains pending, and local Docker/Playwright verification has not yet been executed.**
+- **Current Status**: **Production deployment prepared; application code and browser tests locally verified; container and AWS deployment not yet verified.**
+- **Phase 10 Status**: **Phase 10 implementation, verification audit, and browser smoke test suite complete. AWS deployment remains pending, and local Docker verification has not yet been executed.**
 - **Verification Matrix**:
   - **Application implementation**: Complete
   - **Security hardening**: Complete
   - **Container configuration**: Prepared (runtime verification pending)
-  - **AWS deployment**: Pending
-  - **Browser E2E verification**: Pending
+  - **Browser E2E verification**: Complete (3/3 smoke tests passing)
   - **Local Docker runtime verification**: Pending
+  - **AWS deployment**: Pending
 - **Tested Foundations**:
   - Express 5 application cleanly decoupled from HTTP server (`app.js` vs `server.js`).
   - Dual healthcheck probes: Liveness (`GET /api/v1/health/live`) and Readiness (`GET /api/v1/health/ready` with graceful drain checking).
@@ -74,9 +74,9 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
     - **ADR-36 Cloud Architecture Selection**: EC2 with Docker Compose (`t3.small` / `t4g.small`), MongoDB Atlas managed database, AWS S3 for media storage, AWS SES for transactional emails, Route 53 DNS, Certbot SSL/TLS.
     - **Health-Checked Deployment Pipeline**: Scripted deployment pipeline via `scripts/deploy.sh` with readiness probe gating and rollback support.
     - **S3 & SES Integration**: `@aws-sdk/client-s3` presigned URL generation and `@aws-sdk/client-ses` dispatch with safe test-mode fallbacks.
-    - **Browser E2E Configuration**: Light browser smoke testing configuration (`playwright.config.js`) and UI test suite (`smoke.spec.js`) authored (Playwright execution requires installing `@playwright/test` and browser binaries).
-  - Automated integration test suite using **Vitest** and **Supertest** passing **204/204 tests across 18 test files (100%)**.
-  - Verified frontend production build compiling cleanly in 2.35s with zero warnings.
+    - **Browser E2E Suite**: Playwright browser smoke testing configuration (`playwright.config.js`) and UI test suite (`smoke.spec.js`) verified (3/3 passed).
+  - Automated integration test suite using **Vitest** and **Supertest** passing **205/205 tests across 18 test files (100%)**.
+  - Verified frontend production build compiling cleanly with zero warnings.
 
 ---
 
@@ -101,8 +101,8 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
 ## 4. Phase 10 Final Verification Breakdown
 
 ### Verified
-- **Backend Test Suite (`npm test`)**: Passed **204/204 tests across 18 test files (100%)** in 74.33s.
-  - `tests/health.test.js`: 3 tests passed.
+- **Backend Test Suite (`npm test`)**: Passed **205/205 tests across 18 test files (100%)**.
+  - `tests/health.test.js`: 4 tests passed.
   - `tests/concurrency.test.js`: 4 tests passed.
   - `tests/wishlist.test.js`: 8 tests passed.
   - `tests/checkout.test.js`: 4 tests passed.
@@ -120,11 +120,11 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
   - `tests/order.test.js`: 11 tests passed.
   - `tests/auth.test.js`: 22 tests passed.
   - `tests/e2e.test.js`: 17 tests passed (API-level integration tests).
-- **Frontend Production Build (`npm run build`)**: Compiled cleanly in 2.35s with zero warnings (client bundle: 490.63 kB).
+- **Frontend Production Build (`npm run build`)**: Compiled cleanly in 7.95s with zero warnings (client bundle: 496.02 kB).
+- **Playwright Browser Tests (`npx playwright test`)**: Passed **3/3 smoke tests (100%)** across Chromium testing Homepage layout/branding, Catalog search & filter controls, and Authentication form visibility.
 - **Deployment Scripts & Manifests**: `scripts/setup-ec2.sh`, `scripts/deploy.sh`, `scripts/health-check.sh`, `docker-compose.prod.yml` prepared.
 
 ### Not Executed
-- **Playwright Browser Tests**: Test file `smoke.spec.js` and config exist, but `@playwright/test` and browser binaries are not installed in `frontend/`.
 - **Docker Compose Runtime Verification**: `docker compose -f docker-compose.prod.yml config` and local image builds could not be executed locally because Docker CLI is not installed on this host.
 
 ### Requires AWS

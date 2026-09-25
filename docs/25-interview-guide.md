@@ -89,3 +89,23 @@ This project is engineered specifically to serve as a centerpiece portfolio demo
   - **SameSite Reality**: `SameSite: 'lax'` prevents cross-site requests from transmitting cookies in sub-resource requests (images, iframes), providing critical CSRF protection.
   - **Secure Reality**: `Secure: true` ensures the cookie is only transmitted over encrypted TLS/HTTPS connections in production.
 - **Where demonstrated**: `backend/src/config/session.js` and [18-security.md](file:///c:/Users/vines/react%20first%20project/docs/18-security.md).
+
+---
+
+### 2.9 Dual Health Probes: Liveness vs Readiness and Graceful Shutdown
+- **What the interviewer will ask**: *"Why do you have two distinct health endpoints (`/health` vs `/health/ready`), and what happens during a deployment shutdown?"*
+- **What you must understand**:
+  - **Liveness (`/api/v1/health` and `/api/v1/health/live`)**: Answers *"Is the Node.js process alive and able to process HTTP requests?"* If this fails or hangs (e.g., event loop deadlock), the container orchestrator (Docker / Kubernetes) restarts the container. It does NOT check external databases.
+  - **Readiness (`/api/v1/health/ready`)**: Answers *"Is the service currently capable of handling live customer transactions?"* It verifies that the MongoDB connection is alive.
+  - **Graceful Shutdown & Connection Draining**: Upon receiving `SIGTERM`/`SIGINT`, the server immediately flags `isShuttingDown = true`. The readiness probe immediately responds with HTTP 503 `shutting_down`, signaling reverse proxies and load balancers to stop routing new traffic. `server.close()` allows in-flight checkout requests to finish within a 10-second drain window before closing database connections.
+- **Where demonstrated**: `backend/src/modules/health/health.controller.js`, `backend/src/server.js`, and `docker-compose.prod.yml`.
+
+---
+
+### 2.10 Testing Strategy: In-Memory API Integration vs Headless Browser Smoke Testing
+- **What the interviewer will ask**: *"How do you structure your automated testing strategy to balance fast CI/CD execution speed with real-world user interface confidence?"*
+- **What you must understand**:
+  - **In-Memory Supertest Integration (Fast & Deep)**: 205 tests run in ~74 seconds across 18 test files using Vitest and Supertest. It tests complex transactional logic (concurrency race conditions, atomic increments, multi-tier pricing, wallet ledgers, refund capacity checks) in-memory without spinning up browsers or operating system network sockets.
+  - **Playwright Headless Browser Smoke Suite (Real DOM & Routing)**: Complements backend tests by launching Chromium to test compiled production bundles in seconds. It verifies brand layout, route navigation (avoiding 404 traps), catalog search filters, and active authentication form controls.
+  - **Separation of Concerns**: We don't test 100 edge cases in Playwright (which would take 20 minutes and suffer from browser flakiness); we test domain logic in Supertest and verify UI integrity with Playwright smoke tests.
+- **Where demonstrated**: `backend/tests/` and `frontend/tests/e2e/smoke.spec.js`.

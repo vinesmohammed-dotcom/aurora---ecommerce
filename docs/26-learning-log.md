@@ -824,6 +824,19 @@ For full 6-part deep dives (*Real-World Analogy, Technical Explanation, Project 
 - **Interview Question**: *"Why are S3 Presigned URLs preferred over uploading files through an Express/Node.js backend, and how does it protect the server?"*
 - **Interview Answer**: *"Uploading binary files directly through Express forces Node.js to receive, parse, and buffer large multi-part streams, consuming memory and tying up network sockets that should be handling API requests. Generating an S3 Presigned URL offloads the entire upload bandwidth to Amazon S3's infrastructure, ensuring our backend processes only lightweight JSON requests."*
 
+---
+
+### 36. Browser Smoke Testing with Playwright & Non-Blocking CI/CD Reporters
+- **Analogy**: A car assembly line inspection. Static and unit tests verify that the spark plugs and fuel injectors meet factory blueprints on the workbench (backend Vitest tests). But before rolling the car off the showroom floor, a test driver sits in the driver's seat, turns the physical key, presses the accelerator, and confirms the speedometer needle rises and the headlights turn on (Playwright browser testing).
+- **Technical Explanation**:
+  - While backend integration tests (`Supertest` + `Vitest`) verify HTTP endpoints, headers, cookies, and database state transitions, they do not execute client-side JavaScript or render actual DOM trees.
+  - Browser E2E smoke tests launch real headless browser instances (Chromium) to ensure that the compiled Single Page Application (SPA) correctly mounts, routes match without falling into 404 traps, brand navigation operates, and critical form controls (`<input type="email">`, `<input type="password">`, `<button type="submit">`) are visible and interactive.
+  - In automated CI/CD and developer CLI environments, test reporters must be non-blocking. By default, Playwright's HTML reporter starts a local HTTP server (`port 9323`) and blocks the process waiting for `Ctrl+C`. Configuring `reporter: [["list"], ["html", { open: "never" }]]` outputs immediate tabular results to the terminal and persists test artifacts to disk without halting build pipelines.
+- **Actual Project Example**: `frontend/playwright.config.js`, `frontend/tests/e2e/smoke.spec.js`, `frontend/src/pages/LoginPage.jsx`.
+- **Interview Question**: *"Why should you maintain both Supertest API integration tests and Playwright browser tests instead of relying exclusively on one?"*
+- **Interview Answer**: *"Supertest runs in-process without OS socket allocation, allowing hundreds of backend scenarios (concurrency race conditions, atomic increments, wallet ledgers) to execute in seconds without browser overhead. However, Supertest cannot detect client-side hydration failures, broken React Router mappings, CSS rendering bugs, or missing form inputs. Playwright complements the backend test suite by running a fast, high-confidence browser smoke suite across critical user paths to guarantee that compiled storefront assets function properly in real browsers."*
+
+
 
 
 

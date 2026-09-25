@@ -1,8 +1,8 @@
 # Phase 10 — AWS Production Deployment & Cloud Architecture (Accuracy Audit & Milestone Report)
 
-**Date**: September 23, 2026  
-**Status**: Production deployment prepared; application code locally verified; container and AWS deployment not yet verified.  
-**Milestone State**: Phase 10 implementation and verification audit complete. AWS deployment remains pending, and local Docker/Playwright verification has not yet been executed.  
+**Date**: September 25, 2026  
+**Status**: Production deployment prepared; application code and browser tests locally verified; container and AWS deployment not yet verified.  
+**Milestone State**: Phase 10 implementation, verification audit, and browser smoke test suite complete. AWS deployment remains pending, and local Docker verification has not yet been executed.  
 **Objective**: Prepare the Aurora modular monolith platform for production deployment on AWS using a cost-effective, maintainable architecture; separate local verification from cloud readiness; and audit all operational, security, and architectural claims with strict technical accuracy.
 
 ---
@@ -34,7 +34,7 @@
 
 - **Backend Integration & API-Level E2E Test Suite (`npm test`)**:
   - **18 / 18 test files passed (100%)**
-  - **204 / 204 tests passed (100%)**
+  - **205 / 205 tests passed (100%)**
   - Total duration: 74.33s. Zero regressions across all modules (auth, cart, checkout, concurrency, coupons, orders, payments, products, refunds, reports, wallet, wishlist, health).
 - **Frontend Production Compilation (`npm run build`)**:
   - Built cleanly in 2.35s with Vite 8.3.0.
@@ -43,6 +43,13 @@
 - **Security & Secret Scanning**:
   - Verified that no real AWS credentials, Razorpay secret keys, or MongoDB passwords exist in code or Git.
   - Only template files (`.env.example`) are present.
+- **Browser-Level E2E Smoke Suite (`npx playwright test`)**:
+  - **1 / 1 test files passed (100%)**
+  - **3 / 3 tests passed (100%)** in 10.0s on Chromium.
+  - Verified:
+    1. Homepage brand identity, navigation bar, and cart action presence.
+    2. Catalog navigation renders products list and search/filter controls.
+    3. Customer authentication page displays login form with email, password, and submit controls.
 - **Service Initialization**:
   - `@aws-sdk/client-s3`, `@aws-sdk/client-ses`, and `@aws-sdk/s3-request-presigner` installed and verified without syntax or module import errors during test execution.
 
@@ -297,8 +304,7 @@ git checkout <PREVIOUS_STABLE_COMMIT_HASH>
 1. **Single EC2 Node**: For the expected initial traffic of this portfolio project, a single EC2 instance keeps the deployment simple and cost-effective. Higher traffic or strict high-availability requirements would require load testing and potentially multiple instances behind an Application Load Balancer.
 2. **In-Memory Rate Limiting**: `express-rate-limit` currently tracks request counts in Node.js process memory. In a multi-instance cluster, a shared cache (e.g. Redis) or AWS WAF would be required to synchronize rate-limit windows across nodes.
 3. **Local Docker CLI Unavailable**: Docker is not installed in the developer's local Windows environment; Docker manifests were validated by file inspection and syntax checks rather than local daemon execution.
-4. **Playwright Dependency Missing**: Browser-level smoke tests require installing `@playwright/test` and browser binaries before they can be executed.
-5. **No File Upload Endpoint**: S3 service is implemented, but no REST route currently accepts multipart/form-data file uploads to store photos into S3.
+4. **No File Upload Endpoint**: S3 service is implemented, but no REST route currently accepts multipart/form-data file uploads to store photos into S3.
 
 ---
 
@@ -316,20 +322,16 @@ When ready to execute a real cloud deployment:
 
 ## 17. Final Audit Conclusion & Explicit Remaining Tasks
 
-> **Phase 10 implementation is complete and the accuracy audit is complete. The application code has been locally verified, while Docker runtime verification, browser Playwright verification, and real AWS deployment remain pending.**
+> **Phase 10 implementation, verification audit, and browser Playwright smoke testing are complete. The application code and browser UI flows have been locally verified, while Docker runtime verification and real AWS cloud deployment remain pending.**
 
 ### Explicit Remaining Tasks
 
-1. **Local Playwright Installation & Browser E2E Execution**:
-   - Install dev dependency: `npm install --save-dev @playwright/test` in `frontend/`
-   - Download browser binaries: `npx playwright install --with-deps`
-   - Run browser smoke test suite: `npx playwright test`
-2. **Local Docker Runtime Verification**:
+1. **Local Docker Runtime Verification**:
    - Install/enable Docker Desktop or Docker Engine on host.
    - Validate Compose syntax: `docker compose -f docker-compose.prod.yml config`
    - Build production images and start containers: `docker compose -f docker-compose.prod.yml up --build -d`
    - Verify health probes (`/api/v1/health/live`, `/api/v1/health/ready`) and reverse proxy routing through Nginx.
-3. **AWS Live Cloud Deployment & Infrastructure Verification**:
+2. **AWS Live Cloud Deployment & Infrastructure Verification**:
    - Launch Ubuntu 24.04 LTS EC2 instance (`t3.small`), allocate Elastic IP, and attach Security Group.
    - Provision MongoDB Atlas database (M10+ recommended for automated backups/PITR) and whitelist Elastic IP.
    - Configure Route 53 DNS `A` record and issue Let's Encrypt TLS certificate via Certbot.
