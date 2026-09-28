@@ -157,7 +157,7 @@ class ReviewService {
   /**
    * Public: Query published product reviews with pagination, sorting, and rating summary
    */
-  static async getProductReviews(productId, { page = 1, limit = 10, rating, sort = "newest" } = {}) {
+  static async getProductReviews(productId, { page = 1, limit = 10, rating, sort = "newest" } = {}, currentUserId = null) {
     const prodId = new mongoose.Types.ObjectId(productId);
     const query = {
       productId: prodId,
@@ -172,7 +172,8 @@ class ReviewService {
       newest: { createdAt: -1 },
       oldest: { createdAt: 1 },
       highest: { rating: -1, createdAt: -1 },
-      lowest: { rating: 1, createdAt: -1 }
+      lowest: { rating: 1, createdAt: -1 },
+      helpful: { helpfulCount: -1, createdAt: -1 }
     };
     const sortOption = sortMap[sort] || sortMap.newest;
 
@@ -191,7 +192,7 @@ class ReviewService {
       this.getProductRatingSummary(productId)
     ]);
 
-    // Format safe reviewer output
+    // Format safe reviewer output and determine if active user voted helpful
     const formattedReviews = reviews.map((r) => ({
       _id: r._id,
       productId: r.productId,
@@ -202,6 +203,11 @@ class ReviewService {
       title: r.title,
       comment: r.comment,
       helpfulCount: r.helpfulCount || 0,
+      hasVotedHelpful: Boolean(
+        currentUserId &&
+          r.helpfulVoters &&
+          r.helpfulVoters.some((voterId) => voterId.toString() === currentUserId.toString())
+      ),
       isVerifiedPurchase: r.isVerifiedPurchase,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt

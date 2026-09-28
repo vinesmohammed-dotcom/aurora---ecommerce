@@ -31,7 +31,8 @@ const createProductReview = asyncHandler(async (req, res) => {
  */
 const getProductReviews = asyncHandler(async (req, res) => {
   const { productId } = req.params;
-  const { reviews, summary, meta } = await ReviewService.getProductReviews(productId, req.query);
+  const currentUserId = req.user?._id;
+  const { reviews, summary, meta } = await ReviewService.getProductReviews(productId, req.query, currentUserId);
 
   new ApiResponse(HTTP_CODES.OK, { reviews, summary }, "Reviews fetched successfully.", meta).send(res);
 });
