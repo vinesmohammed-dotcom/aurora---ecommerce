@@ -1,8 +1,7 @@
 import React, { useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useSelector, useDispatch } from "react-redux";
-import { clearUser } from "../store/slices/authSlice";
-import api from "../services/api";
+import { Link, NavLink, Outlet } from "react-router-dom";
+import { useSelector } from "react-redux";
+import { useLogout } from "../features/auth/useLogout";
 
 const NAVIGATION_SECTIONS = [
   {
@@ -18,7 +17,8 @@ const NAVIGATION_SECTIONS = [
       { name: "Products & Variants", path: "/admin/products", icon: "🏷️" },
       { name: "Inventory Matrix", path: "/admin/inventory", icon: "📦" },
       { name: "Categories", path: "/admin/categories", icon: "📁" },
-      { name: "Brands", path: "/admin/brands", icon: "🏢" }
+      { name: "Brands", path: "/admin/brands", icon: "🏢" },
+      { name: "Product Reviews", path: "/admin/reviews", icon: "⭐" }
     ]
   },
   {
@@ -54,19 +54,7 @@ const NAVIGATION_SECTIONS = [
 export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user } = useSelector((state) => state.auth);
-  const dispatch = useDispatch();
-  const navigate = useNavigate();
-
-  const handleLogout = async () => {
-    try {
-      await api.post("/auth/logout");
-    } catch {
-      // Proceed with client side clearing regardless
-    } finally {
-      dispatch(clearUser());
-      navigate("/login");
-    }
-  };
+  const { handleLogout } = useLogout();
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans text-slate-800">
@@ -91,12 +79,21 @@ export default function AdminLayout() {
             AURORA <span className="text-emerald-400 text-xs px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800 uppercase font-mono">Control</span>
           </span>
         </div>
-        <Link
-          to="/"
-          className="text-xs bg-slate-800 text-slate-300 px-2.5 py-1.5 rounded hover:bg-slate-700 transition"
-        >
-          Storefront &rarr;
-        </Link>
+        <div className="flex items-center space-x-2">
+          <Link
+            to="/"
+            className="text-xs bg-slate-800 text-slate-300 px-2.5 py-1.5 rounded hover:bg-slate-700 transition"
+          >
+            Storefront &rarr;
+          </Link>
+          <button
+            type="button"
+            onClick={() => handleLogout()}
+            className="text-xs bg-rose-950/80 border border-rose-800/60 text-rose-300 px-2.5 py-1.5 rounded hover:bg-rose-900 transition"
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
       {/* Sidebar Overlay for Mobile */}
@@ -177,11 +174,11 @@ export default function AdminLayout() {
             </Link>
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={() => handleLogout()}
               className="flex items-center justify-center space-x-1 py-1.5 rounded bg-rose-950/60 border border-rose-800/40 hover:bg-rose-900/60 text-rose-300 transition"
               title="Terminate Admin Session"
             >
-              <span>Sign Out</span>
+              <span>Logout</span>
             </button>
           </div>
         </div>
@@ -197,7 +194,7 @@ export default function AdminLayout() {
             <span className="text-slate-300">|</span>
             <span className="text-xs text-slate-500 font-mono">Phase 8 Portfolio Edition</span>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3">
             <Link
               to="/"
               className="inline-flex items-center space-x-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-md transition"
@@ -207,6 +204,13 @@ export default function AdminLayout() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
               </svg>
             </Link>
+            <button
+              type="button"
+              onClick={() => handleLogout()}
+              className="inline-flex items-center space-x-1.5 text-xs font-medium text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-md transition"
+            >
+              <span>Logout</span>
+            </button>
           </div>
         </header>
 

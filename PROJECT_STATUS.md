@@ -12,7 +12,7 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
   - **Application implementation**: Complete
   - **Security hardening**: Complete
   - **Container configuration**: Prepared (runtime verification pending)
-  - **Browser E2E verification**: Complete (3/3 smoke tests passing)
+  - **Browser E2E verification**: Complete (6/6 smoke tests passing)
   - **Local Docker runtime verification**: Pending
   - **AWS deployment**: Pending
 - **Tested Foundations**:
@@ -121,7 +121,7 @@ Build and deploy an enterprise-grade, full-stack MERN e-commerce application to 
   - `tests/auth.test.js`: 22 tests passed.
   - `tests/e2e.test.js`: 17 tests passed (API-level integration tests).
 - **Frontend Production Build (`npm run build`)**: Compiled cleanly in 7.95s with zero warnings (client bundle: 496.02 kB).
-- **Playwright Browser Tests (`npx playwright test`)**: Passed **3/3 smoke tests (100%)** across Chromium testing Homepage layout/branding, Catalog search & filter controls, and Authentication form visibility.
+- **Playwright Browser Tests (`npx playwright test`)**: Passed **6/6 smoke tests (100%)** across Chromium testing Homepage layout/branding, Catalog search & filter controls, Authentication form visibility, Client-side field-level Zod validation on empty submission, and Authenticated login session redirection.
 - **Deployment Scripts & Manifests**: `scripts/setup-ec2.sh`, `scripts/deploy.sh`, `scripts/health-check.sh`, `docker-compose.prod.yml` prepared.
 
 ### Not Executed

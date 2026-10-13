@@ -7,19 +7,38 @@ import api from "../../services/api";
 
 export default function AdminDashboardPage() {
   const [data, setData] = useState(null);
+  const [salesReport, setSalesReport] = useState(null);
+  const [chartRange, setChartRange] = useState("30d");
+  const [hoveredPoint, setHoveredPoint] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    async function fetchDashboard() {
+    async function fetchDashboardAndCharts() {
       try {
         setLoading(true);
         setError(null);
-        const res = await api.get("/admin/reports/dashboard");
-        if (res.success && res.data) {
-          setData(res.data);
+
+        const to = new Date();
+        const from = new Date();
+        const days = chartRange === "7d" ? 7 : chartRange === "90d" ? 90 : 30;
+        from.setDate(to.getDate() - days);
+        const fromStr = from.toISOString().split("T")[0];
+        const toStr = to.toISOString().split("T")[0];
+
+        const [dashRes, salesRes] = await Promise.all([
+          api.get("/admin/reports/dashboard"),
+          api.get(`/admin/reports/sales?from=${fromStr}&to=${toStr}`)
+        ]);
+
+        if (dashRes.success && dashRes.data) {
+          setData(dashRes.data);
         } else {
-          setError(res.message || "Failed to load dashboard metrics");
+          setError(dashRes.message || "Failed to load dashboard metrics");
+        }
+
+        if (salesRes.success && salesRes.data) {
+          setSalesReport(salesRes.data);
         }
       } catch (err) {
         setError(err.message || "Network error fetching dashboard metrics");
@@ -27,8 +46,8 @@ export default function AdminDashboardPage() {
         setLoading(false);
       }
     }
-    fetchDashboard();
-  }, []);
+    fetchDashboardAndCharts();
+  }, [chartRange]);
 
   const formatCurrency = (paise) =>
     new Intl.NumberFormat("en-IN", {
@@ -36,6 +55,13 @@ export default function AdminDashboardPage() {
       currency: "INR",
       maximumFractionDigits: 2
     }).format((paise || 0) / 100);
+
+  const formatRupees = (rupees) =>
+    new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0
+    }).format(rupees || 0);
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "N/A";
@@ -68,7 +94,7 @@ export default function AdminDashboardPage() {
     }
   };
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
         <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
@@ -77,7 +103,7 @@ export default function AdminDashboardPage() {
     );
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <Card className="p-6 border-rose-200 bg-rose-50 text-center">
         <div className="text-rose-600 font-semibold mb-2">Error loading dashboard</div>
@@ -90,6 +116,79 @@ export default function AdminDashboardPage() {
   }
 
   const { users, products, orders, financials, recentOrders } = data || {};
+  const dailyBreakdown = salesReport?.dailyBreakdown || [];
+  const topProducts = salesReport?.topProducts || [];
+
+  // SVG Chart Calculations for Sales Trend
+  const chartWidth = 660;
+  const chartHeight = 180;
+  const paddingLeft = 60;
+  const paddingRight = 20;
+  const paddingTop = 20;
+  const paddingBottom = 30;
+  const graphWidth = chartWidth - paddingLeft - paddingRight;
+  const graphHeight = chartHeight - paddingTop - paddingBottom;
+
+  const maxVal = Math.max(
+    ...dailyBreakdown.map((d) => Math.max(d.grossSalesRupees || 0, d.netSalesRupees || 0)),
+    100
+  );
+
+  const points = dailyBreakdown.map((d, idx) => {
+    const x =
+      paddingLeft +
+      (dailyBreakdown.length > 1
+        ? (idx / (dailyBreakdown.length - 1)) * graphWidth
+        : graphWidth / 2);
+    const yGross = paddingTop + graphHeight - ((d.grossSalesRupees || 0) / maxVal) * graphHeight;
+    const yNet = paddingTop + graphHeight - ((d.netSalesRupees || 0) / maxVal) * graphHeight;
+    return { x, yGross, yNet, data: d };
+  });
+
+  const grossPath =
+    points.length > 0
+      ? `M ${points[0].x},${points[0].yGross} ` +
+        points.slice(1).map((p) => `L ${p.x},${p.yGross}`).join(" ")
+      : "";
+
+  const grossAreaPath =
+    points.length > 0
+      ? `${grossPath} L ${points[points.length - 1].x},${paddingTop + graphHeight} L ${points[0].x},${
+          paddingTop + graphHeight
+        } Z`
+      : "";
+
+  const netPath =
+    points.length > 0
+      ? `M ${points[0].x},${points[0].yNet} ` +
+        points.slice(1).map((p) => `L ${p.x},${p.yNet}`).join(" ")
+      : "";
+
+  // Order Status Donut Chart Calculations
+  const statusCounts = [
+    { label: "Delivered", count: orders?.delivered || 0, color: "#10B981" },
+    { label: "Shipped", count: orders?.shipped || 0, color: "#6366F1" },
+    { label: "Processing", count: orders?.processing || 0, color: "#F59E0B" },
+    { label: "Confirmed", count: orders?.confirmed || 0, color: "#0284C7" },
+    { label: "Cancelled", count: orders?.cancelled || 0, color: "#F43F5E" },
+    { label: "Return Req", count: orders?.returnRequested || 0, color: "#A855F7" }
+  ];
+  const totalStatusOrders = statusCounts.reduce((acc, s) => acc + s.count, 0) || 1;
+  const circumference = 2 * Math.PI * 45; // radius = 45
+
+  let accumulatedOffset = 0;
+  const donutSegments = statusCounts.map((s) => {
+    const fraction = s.count / totalStatusOrders;
+    const strokeDash = fraction * circumference;
+    const offset = accumulatedOffset;
+    accumulatedOffset += strokeDash;
+    return {
+      ...s,
+      percentage: Math.round(fraction * 100),
+      strokeDasharray: `${strokeDash} ${circumference - strokeDash}`,
+      strokeDashoffset: -offset
+    };
+  });
 
   return (
     <div className="space-y-8">
@@ -98,7 +197,7 @@ export default function AdminDashboardPage() {
         <div>
           <h1 className="text-2xl font-bold font-heading text-slate-900">Platform Command Center</h1>
           <p className="text-sm text-slate-500">
-            Real-time financial performance, inventory health, order fulfillment pipeline, and customer base metrics.
+            Real-time financial performance, interactive metrics, and order fulfillment trajectory.
           </p>
         </div>
         <div className="flex items-center space-x-3">
@@ -123,7 +222,7 @@ export default function AdminDashboardPage() {
           </div>
         </Card>
 
-        <Card className="p-5 border-l-4 border-l-blue-500 hover:shadow-md transition">
+        <Card className="p-5 border-l-4 border-l-indigo-500 hover:shadow-md transition">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Net Sales Realized</p>
           <p className="text-2xl font-extrabold font-heading text-slate-900 mt-2">
             {formatCurrency(financials?.netSalesPaise)}
@@ -133,13 +232,13 @@ export default function AdminDashboardPage() {
           </div>
         </Card>
 
-        <Card className="p-5 border-l-4 border-l-amber-500 hover:shadow-md transition">
+        <Card className="p-5 border-l-4 border-l-rose-500 hover:shadow-md transition">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Refunds Disbursed</p>
           <p className="text-2xl font-extrabold font-heading text-slate-900 mt-2">
             {formatCurrency(financials?.refundsPaise)}
           </p>
           <div className="mt-2 flex items-center text-xs text-slate-500 space-x-1">
-            <span>Razorpay gateway refunds</span>
+            <span>Settled ledger refunds</span>
           </div>
         </Card>
 
@@ -155,50 +254,294 @@ export default function AdminDashboardPage() {
         </Card>
       </div>
 
-      {/* Operational Grids: Fulfillment Pipeline & Inventory Health */}
+      {/* Interactive Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Order Fulfillment Pipeline */}
+        {/* Sales & Revenue Trend Chart */}
         <Card className="p-6 lg:col-span-2 border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-bold font-heading text-slate-900">Order Fulfillment Pipeline</h2>
-            <Link to="/admin/orders" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
-              Manage Orders &rarr;
-            </Link>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-              <span className="text-xs font-medium text-slate-500">Confirmed</span>
-              <p className="text-2xl font-bold text-blue-600 mt-1">{orders?.confirmed || 0}</p>
-              <span className="text-[11px] text-slate-400">Ready to pack</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            <div>
+              <h2 className="text-base font-bold font-heading text-slate-900">
+                Revenue Trajectory & Sales Volume
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Daily financial inflow comparing Gross Sales vs Net Realized Revenue
+              </p>
             </div>
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-              <span className="text-xs font-medium text-slate-500">Processing</span>
-              <p className="text-2xl font-bold text-amber-600 mt-1">{orders?.processing || 0}</p>
-              <span className="text-[11px] text-slate-400">Fulfillment in progress</span>
-            </div>
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-              <span className="text-xs font-medium text-slate-500">Shipped</span>
-              <p className="text-2xl font-bold text-indigo-600 mt-1">{orders?.shipped || 0}</p>
-              <span className="text-[11px] text-slate-400">In transit</span>
-            </div>
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-              <span className="text-xs font-medium text-slate-500">Delivered</span>
-              <p className="text-2xl font-bold text-emerald-600 mt-1">{orders?.delivered || 0}</p>
-              <span className="text-[11px] text-slate-400">Completed cycles</span>
+            {/* Timeframe Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg">
+              {["7d", "30d", "90d"].map((range) => (
+                <button
+                  key={range}
+                  type="button"
+                  onClick={() => setChartRange(range)}
+                  className={`rounded-md px-3 py-1 text-xs font-semibold transition cursor-pointer ${
+                    chartRange === range
+                      ? "bg-white text-slate-900 shadow-xs"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  {range === "7d" ? "7 Days" : range === "90d" ? "90 Days" : "30 Days"}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs text-slate-600">
-            <div>
-              <span className="text-slate-400">Total All-Time:</span> <span className="font-semibold text-slate-800">{orders?.total || 0}</span>
+          {/* SVG Chart Container */}
+          <div className="relative">
+            {dailyBreakdown.length > 0 ? (
+              <div className="overflow-x-auto">
+                <svg
+                  viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                  className="w-full h-auto min-w-[500px]"
+                >
+                  <defs>
+                    <linearGradient id="grossGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10B981" stopOpacity="0.25" />
+                      <stop offset="100%" stopColor="#10B981" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Horizontal Gridlines */}
+                  {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
+                    const y = paddingTop + graphHeight - pct * graphHeight;
+                    return (
+                      <g key={i}>
+                        <line
+                          x1={paddingLeft}
+                          y1={y}
+                          x2={chartWidth - paddingRight}
+                          y2={y}
+                          stroke="#E2E8F0"
+                          strokeDasharray="4 4"
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={paddingLeft - 8}
+                          y={y + 3}
+                          fontSize="9"
+                          fill="#94A3B8"
+                          textAnchor="end"
+                          fontFamily="sans-serif"
+                        >
+                          ₹{(maxVal * pct).toFixed(0)}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* Area fill */}
+                  {grossAreaPath && <path d={grossAreaPath} fill="url(#grossGradient)" />}
+
+                  {/* Gross Sales Line (Emerald) */}
+                  {grossPath && (
+                    <path
+                      d={grossPath}
+                      fill="none"
+                      stroke="#10B981"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  )}
+
+                  {/* Net Sales Line (Indigo) */}
+                  {netPath && (
+                    <path
+                      d={netPath}
+                      fill="none"
+                      stroke="#6366F1"
+                      strokeWidth="2"
+                      strokeDasharray="5 3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  )}
+
+                  {/* Data Points */}
+                  {points.map((p, i) => (
+                    <g key={i} className="cursor-pointer">
+                      <circle
+                        cx={p.x}
+                        cy={p.yGross}
+                        r={hoveredPoint?.data?.date === p.data.date ? 5 : 3}
+                        fill="#10B981"
+                        stroke="#FFFFFF"
+                        strokeWidth="1.5"
+                        onMouseEnter={() => setHoveredPoint(p)}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                      />
+                    </g>
+                  ))}
+
+                  {/* X-Axis Date Labels */}
+                  {points
+                    .filter((_, idx) => idx === 0 || idx === Math.floor(points.length / 2) || idx === points.length - 1)
+                    .map((p, i) => (
+                      <text
+                        key={i}
+                        x={p.x}
+                        y={chartHeight - 8}
+                        fontSize="10"
+                        fill="#64748B"
+                        textAnchor="middle"
+                        fontFamily="sans-serif"
+                      >
+                        {p.data.date}
+                      </text>
+                    ))}
+                </svg>
+              </div>
+            ) : (
+              <div className="flex h-44 items-center justify-center text-xs text-slate-400">
+                No revenue records within this selected timeframe.
+              </div>
+            )}
+
+            {/* Hover Tooltip Card */}
+            {hoveredPoint && (
+              <div
+                className="absolute z-10 rounded-lg bg-slate-900 p-2.5 text-xs text-white shadow-xl pointer-events-none transform -translate-x-1/2 -translate-y-full"
+                style={{
+                  left: `${(hoveredPoint.x / chartWidth) * 100}%`,
+                  top: `${(hoveredPoint.yGross / chartHeight) * 100 - 8}%`
+                }}
+              >
+                <p className="font-semibold text-slate-300 border-b border-slate-700 pb-1 mb-1">
+                  {hoveredPoint.data.date}
+                </p>
+                <div className="space-y-0.5">
+                  <p className="text-emerald-400">Gross: {formatRupees(hoveredPoint.data.grossSalesRupees)}</p>
+                  <p className="text-indigo-300">Net: {formatRupees(hoveredPoint.data.netSalesRupees)}</p>
+                  <p className="text-slate-400">{hoveredPoint.data.orderCount} order(s)</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Chart Legend */}
+          <div className="mt-4 flex items-center justify-end gap-6 border-t border-slate-100 pt-3 text-xs text-slate-600">
+            <div className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+              <span>Gross Sales (Area)</span>
             </div>
-            <div>
-              <span className="text-slate-400">Cancelled:</span> <span className="font-semibold text-rose-600">{orders?.cancelled || 0}</span>
-            </div>
-            <div>
-              <span className="text-slate-400">Return Inquiries:</span> <span className="font-semibold text-amber-600">{orders?.returnRequested || 0}</span>
+            <div className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-indigo-500" />
+              <span>Net Revenue (Dashed)</span>
             </div>
           </div>
+        </Card>
+
+        {/* Order Status Distribution Donut Chart */}
+        <Card className="p-6 border border-slate-200 flex flex-col justify-between">
+          <div>
+            <h2 className="text-base font-bold font-heading text-slate-900 mb-1">
+              Fulfillment Pipeline Mix
+            </h2>
+            <p className="text-xs text-slate-500 mb-4">
+              Real-time proportion of active lifecycle order statuses
+            </p>
+
+            <div className="flex items-center justify-center my-3">
+              <div className="relative h-44 w-44">
+                <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
+                  {donutSegments.map((seg, idx) => (
+                    <circle
+                      key={idx}
+                      cx="60"
+                      cy="60"
+                      r="45"
+                      fill="transparent"
+                      stroke={seg.color}
+                      strokeWidth="16"
+                      strokeDasharray={seg.strokeDasharray}
+                      strokeDashoffset={seg.strokeDashoffset}
+                      className="transition-all duration-500"
+                    />
+                  ))}
+                </svg>
+                {/* Center Badge */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                  <span className="text-2xl font-extrabold text-slate-900">{orders?.total || 0}</span>
+                  <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
+                    Orders
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Status Breakdown Legend */}
+            <div className="space-y-1.5 pt-2">
+              {donutSegments.map((s, idx) => (
+                <div key={idx} className="flex items-center justify-between text-xs text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
+                    <span>{s.label}</span>
+                  </div>
+                  <div className="flex items-center gap-2 font-mono">
+                    <span className="font-semibold text-slate-900">{s.count}</span>
+                    <span className="text-slate-400 text-[11px]">({s.percentage}%)</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Operational Grids: Top-Selling Leaderboard & Inventory Alert */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Top-Selling Products Leaderboard */}
+        <Card className="p-6 lg:col-span-2 border border-slate-200">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-base font-bold font-heading text-slate-900">
+                Top-Selling Products Leaderboard
+              </h2>
+              <p className="text-xs text-slate-500">
+                Authorized product performance ranked by units sold in the selected period
+              </p>
+            </div>
+            <Link to="/admin/reports" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+              Detailed Analytics &rarr;
+            </Link>
+          </div>
+
+          {topProducts && topProducts.length > 0 ? (
+            <div className="space-y-4">
+              {topProducts.slice(0, 5).map((prod, idx) => {
+                const maxUnits = topProducts[0]?.unitsSold || 1;
+                const pct = Math.min(100, Math.round((prod.unitsSold / maxUnits) * 100));
+                return (
+                  <div key={prod.productId || idx} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-700">
+                          #{idx + 1}
+                        </span>
+                        <span className="font-semibold text-slate-900 line-clamp-1">{prod.name}</span>
+                        {prod.sku && <span className="text-[11px] font-mono text-slate-400">({prod.sku})</span>}
+                      </div>
+                      <div className="flex items-center gap-3 font-mono">
+                        <span className="font-bold text-slate-800">{prod.unitsSold} sold</span>
+                        <span className="text-emerald-600 font-semibold">{formatRupees(prod.revenueRupees)}</span>
+                      </div>
+                    </div>
+                    {/* Visual Progress Bar */}
+                    <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-indigo-500 transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-xs text-slate-400">
+              No top-selling product data available for this timeframe.
+            </div>
+          )}
         </Card>
 
         {/* Catalog & Inventory Alert */}

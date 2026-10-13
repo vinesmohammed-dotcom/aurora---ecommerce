@@ -29,7 +29,8 @@ describe("Phase 8 — Admin Dashboard, Reports, Export/PDF & Governance Tests", 
     }
 
     await User.deleteMany({ email: { $in: ["admin.p8@example.com", "user.p8@example.com"] } });
-    await Order.deleteMany({ orderNumber: { $regex: /^ORD-P8-/ } });
+    await Order.deleteMany({});
+    await Refund.deleteMany({});
     await Product.deleteMany({ slug: "p8-test-smartwatch" });
     await Category.deleteMany({ slug: "p8-electronics" });
     await Brand.deleteMany({ slug: "p8-brand" });

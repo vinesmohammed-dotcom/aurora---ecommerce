@@ -30,10 +30,10 @@ export default function AdminCategoriesPage() {
       });
       if (search.trim()) params.set("search", search.trim());
 
-      const res = await api.get(`/categories?${params.toString()}`);
+      const res = await api.get(`/admin/categories?${params.toString()}`);
       if (res.success) {
-        setCategories(res.data.categories || []);
-        setPagination(res.data.pagination || { total: 0, pages: 1, limit: 10 });
+        setCategories(Array.isArray(res.data) ? res.data : (res.data?.categories || []));
+        setPagination(res.meta || res.data?.pagination || { total: 0, pages: 1, limit: 10 });
       }
     } catch (err) {
       setError(err.message || "Failed to load categories");
@@ -83,15 +83,15 @@ export default function AdminCategoriesPage() {
 
     try {
       if (editingCategory) {
-        // Update
-        const res = await api.put(`/categories/${editingCategory._id}`, formData);
+        // Update via Admin PATCH endpoint
+        const res = await api.patch(`/admin/categories/${editingCategory._id}`, formData);
         if (res.success) {
           closeModal();
           fetchCategories();
         }
       } else {
-        // Create
-        const res = await api.post("/categories", formData);
+        // Create via Admin POST endpoint
+        const res = await api.post("/admin/categories", formData);
         if (res.success) {
           closeModal();
           fetchCategories();
@@ -106,7 +106,7 @@ export default function AdminCategoriesPage() {
 
   const handleToggleStatus = async (cat) => {
     try {
-      await api.put(`/categories/${cat._id}`, { isActive: !cat.isActive });
+      await api.patch(`/admin/categories/${cat._id}`, { isActive: !cat.isActive });
       fetchCategories();
     } catch (err) {
       alert("Failed to toggle status: " + (err.message || "Unknown error"));
@@ -116,7 +116,7 @@ export default function AdminCategoriesPage() {
   const handleDelete = async (cat) => {
     if (!window.confirm(`Are you sure you want to delete category "${cat.name}"?`)) return;
     try {
-      await api.delete(`/categories/${cat._id}`);
+      await api.delete(`/admin/categories/${cat._id}`);
       fetchCategories();
     } catch (err) {
       alert("Failed to delete category: " + (err.message || "Unknown error"));

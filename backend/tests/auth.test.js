@@ -510,4 +510,169 @@ describe("Phase 2 — Authentication & User Management (Comprehensive Integratio
       expect(updatedUser.name).toBe("Updated Profile Name");
     });
   });
+
+  // ============================================================================
+  // 5. USER REFERRALS & WALLET REWARD LEDGER INTEGRATION
+  // ============================================================================
+  describe("User Referrals & Wallet Rewards", () => {
+    let referrerUser;
+
+    beforeAll(async () => {
+      referrerUser = await User.create({
+        name: "Referrer Queen",
+        email: "referrer@example.com",
+        passwordHash: await User.hashPassword("Password123!"),
+        isVerified: true,
+        referralCode: "AUR-REF100"
+      });
+    });
+
+    it("should reject registration with invalid or non-existent referral code", async () => {
+      const response = await request(app).post("/api/v1/auth/register").send({
+        name: "Friend One",
+        email: "friend.one@example.com",
+        password: "Password123!",
+        referralCode: "AUR-FAKE99"
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.body.success).toBe(false);
+      expect(response.body.message).toContain("Invalid or inactive referral code");
+    });
+
+    it("should reject self-referral using own email", async () => {
+      const response = await request(app).post("/api/v1/auth/register").send({
+        name: "Self Referral",
+        email: "referrer@example.com",
+        password: "Password123!",
+        referralCode: "AUR-REF100"
+      });
+
+      // Existing email check or self referral check
+      expect(response.status).toBeGreaterThanOrEqual(400);
+    });
+
+    it("should successfully register with valid referral code and award wallet bonuses upon OTP verification", async () => {
+      // 1. Register with valid referral code
+      const regRes = await request(app).post("/api/v1/auth/register").send({
+        name: "Referred Friend",
+        email: "referred.friend@example.com",
+        password: "Password123!",
+        referralCode: "AUR-REF100"
+      });
+
+      expect(regRes.status).toBe(201);
+      expect(regRes.body.success).toBe(true);
+
+      const newUser = await User.findOne({ email: "referred.friend@example.com" });
+      expect(newUser).toBeTruthy();
+      expect(newUser.referredBy.toString()).toBe(referrerUser._id.toString());
+      expect(newUser.referralCode).toBeTruthy();
+
+      // 2. Fetch or mock OTP
+      const otpDoc = await OTP.findOne({ email: "referred.friend@example.com", purpose: OTP_PURPOSES.REGISTRATION });
+      expect(otpDoc).toBeTruthy();
+
+      // Create known OTP code to verify
+      const plainCode = "889900";
+      await OTP.create({
+        email: "referred.friend@example.com",
+        purpose: OTP_PURPOSES.REGISTRATION,
+        hashedOtp: OTP.hashOtp(plainCode, {
+          purpose: OTP_PURPOSES.REGISTRATION,
+          email: "referred.friend@example.com"
+        }),
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000)
+      });
+
+      // 3. Verify OTP
+      const verifyRes = await request(app).post("/api/v1/auth/verify-otp").send({
+        email: "referred.friend@example.com",
+        otp: plainCode,
+        purpose: OTP_PURPOSES.REGISTRATION
+      });
+
+      expect(verifyRes.status).toBe(200);
+      expect(verifyRes.body.success).toBe(true);
+
+      // 4. Verify Wallet Ledger credits
+      const Wallet = require("../src/modules/wallet/wallet.model");
+      const WalletTransaction = require("../src/modules/wallet/walletTransaction.model");
+
+      const friendWallet = await Wallet.findOne({ userId: newUser._id });
+      expect(friendWallet).toBeTruthy();
+      expect(friendWallet.balance).toBe(10000); // ₹100 in paise
+
+      const referrerWallet = await Wallet.findOne({ userId: referrerUser._id });
+      expect(referrerWallet).toBeTruthy();
+      expect(referrerWallet.balance).toBe(10000); // ₹100 in paise
+
+      // Verify immutable transaction entries
+      const friendTx = await WalletTransaction.findOne({
+        userId: newUser._id,
+        referenceType: "REFERRAL_REWARD"
+      });
+      expect(friendTx).toBeTruthy();
+      expect(friendTx.amount).toBe(10000);
+      expect(friendTx.type).toBe("CREDIT");
+
+      const referrerTx = await WalletTransaction.findOne({
+        userId: referrerUser._id,
+        referenceType: "REFERRAL_REWARD"
+      });
+      expect(referrerTx).toBeTruthy();
+      expect(referrerTx.amount).toBe(10000);
+      expect(referrerTx.type).toBe("CREDIT");
+    });
+  });
+
+  // ============================================================================
+  // 6. GOOGLE OAUTH AUTHENTICATION
+  // ============================================================================
+  describe("Google OAuth Sign-In Endpoint", () => {
+    it("should reject Google auth request with missing credential", async () => {
+      const response = await request(app).post("/api/v1/auth/google").send({});
+
+      expect(response.status).toBe(422);
+      expect(response.body.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("should authenticate and create session for verified Google ID token", async () => {
+      const AuthService = require("../src/modules/auth/auth.service");
+      // Stub verifyGoogleIdToken to simulate verified Google token
+      const originalVerify = AuthService.verifyGoogleIdToken;
+      AuthService.verifyGoogleIdToken = async () => ({
+        sub: "google_oauth_sub_123456",
+        email: "google.user@example.com",
+        name: "Google VIP User",
+        picture: "https://lh3.googleusercontent.com/avatar.jpg",
+        email_verified: "true",
+        iss: "accounts.google.com"
+      });
+
+      try {
+        const response = await request(app).post("/api/v1/auth/google").send({
+          credential: "mock_jwt_credential_token_12345"
+        });
+
+        expect(response.status).toBe(201);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.user.email).toBe("google.user@example.com");
+        expect(response.body.data.user.name).toBe("Google VIP User");
+
+        // Verify session cookie was issued
+        expect(response.headers["set-cookie"]).toBeDefined();
+
+        // Verify DB record
+        const user = await User.findOne({ email: "google.user@example.com" });
+        expect(user).toBeTruthy();
+        expect(user.googleId).toBe("google_oauth_sub_123456");
+        expect(user.authProvider).toBe("GOOGLE");
+        expect(user.isVerified).toBe(true);
+        expect(user.referralCode).toBeTruthy();
+      } finally {
+        AuthService.verifyGoogleIdToken = originalVerify;
+      }
+    });
+  });
 });

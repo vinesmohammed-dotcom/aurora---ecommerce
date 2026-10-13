@@ -86,7 +86,7 @@ export default function AdminProductsPage() {
       if (categoryFilter) params.set("category", categoryFilter);
       if (brandFilter) params.set("brand", brandFilter);
 
-      const res = await api.get(`/products/admin/all?${params.toString()}`);
+      const res = await api.get(`/admin/products?${params.toString()}`);
       if (res.success) {
         setProducts(res.data.products || []);
         setPagination(res.data.pagination || { total: 0, pages: 1, limit: 10 });
@@ -170,7 +170,7 @@ export default function AdminProductsPage() {
           tags: tagsArray,
           isActive: productForm.isActive
         };
-        const res = await api.put(`/products/${editingProduct._id}`, payload);
+        const res = await api.patch(`/admin/products/${editingProduct._id}`, payload);
         if (res.success) {
           setIsProductModalOpen(false);
           fetchProducts();
@@ -197,7 +197,7 @@ export default function AdminProductsPage() {
             }
           ]
         };
-        const res = await api.post("/products", payload);
+        const res = await api.post("/admin/products", payload);
         if (res.success) {
           setIsProductModalOpen(false);
           fetchProducts();
@@ -213,7 +213,7 @@ export default function AdminProductsPage() {
   const handleDeleteProduct = async (product) => {
     if (!window.confirm(`Delete product "${product.title}"? This cannot be undone.`)) return;
     try {
-      await api.delete(`/products/${product._id}`);
+      await api.patch(`/admin/products/${product._id}/status`);
       fetchProducts();
     } catch (err) {
       alert("Failed to delete product: " + (err.message || "Unknown error"));
@@ -222,7 +222,7 @@ export default function AdminProductsPage() {
 
   const handleToggleProductStatus = async (product) => {
     try {
-      await api.put(`/products/${product._id}`, { isActive: !product.isActive });
+      await api.patch(`/admin/products/${product._id}/status`);
       fetchProducts();
     } catch (err) {
       alert("Failed to toggle status: " + (err.message || "Unknown error"));
@@ -285,15 +285,15 @@ export default function AdminProductsPage() {
       let updatedProduct;
       if (editingVariantId) {
         // Update variant
-        const res = await api.put(
-          `/products/${activeProductForVariants._id}/variants/${editingVariantId}`,
+        const res = await api.patch(
+          `/admin/products/${activeProductForVariants._id}/variants/${editingVariantId}`,
           payload
         );
         updatedProduct = res.data.product;
       } else {
         // Add variant
         const res = await api.post(
-          `/products/${activeProductForVariants._id}/variants`,
+          `/admin/products/${activeProductForVariants._id}/variants`,
           payload
         );
         updatedProduct = res.data.product;
@@ -330,7 +330,7 @@ export default function AdminProductsPage() {
 
     try {
       const res = await api.delete(
-        `/products/${activeProductForVariants._id}/variants/${variantId}`
+        `/admin/products/${activeProductForVariants._id}/variants/${variantId}`
       );
       if (res.success) {
         setActiveProductForVariants(res.data.product);

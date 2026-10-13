@@ -164,9 +164,84 @@ npm test
 
 ---
 
+## Local Demo & Development Environment
+
+> [!WARNING]
+> **DEVELOPMENT ONLY**
+> The accounts, credentials, and seeds below are strictly for local testing and development demonstration. NEVER use these credentials or seed scripts against production environments.
+
+### Local Demo Credentials
+
+| Role | Email | Password | Privileges / Preloaded Data |
+|---|---|---|---|
+| **Admin** | `admin@aurora.local` | `Admin@12345` | Role: `ADMIN`, Full access to `/admin` control plane, inventory, orders, returns, refunds, reports |
+| **Customer** | `customer@aurora.local` | `Customer@12345` | Role: `USER`, Verified, Seeded with Default Address, Preloaded ₹2,500 Wallet Credit, Wishlist items |
+
+---
+
+### Local Access URLs
+
+- **Storefront & App (Docker / Local)**: [http://localhost](http://localhost)
+- **Admin Control Plane**: [http://localhost/admin](http://localhost/admin)
+- **Backend API Direct**: [http://localhost:5000/api/v1](http://localhost:5000/api/v1)
+- **Health Check**: [http://localhost/api/v1/health](http://localhost/api/v1/health)
+
+---
+
+### Development Seed Command
+
+To seed or reset the database with the complete **Aurora Tech Store** demo dataset (4 categories, 4 fictional brands, 12 tech products with variants, 3 coupons, 2 promotional offers, demo customer address, ₹2,500 wallet balance, and historical orders):
+
+```bash
+# From repository root:
+npm run seed:dev
+
+# Or directly from backend/:
+cd backend
+npm run seed:dev
+```
+
+> **Safety Guard**: The seed script (`backend/scripts/seed.dev.js`) incorporates an explicit environment safety assertion. It validates the MongoDB hostname, refuses connections to Atlas SRV or remote cloud endpoints, and terminates immediately if targeted at any non-local or production environment.
+
+---
+
+### Startup Instructions
+
+#### Option 1: Running with Docker (Production-Like Stack)
+
+Ensure MongoDB is running locally on port 27017, then launch the containers:
+
+```bash
+# Start Docker production-like containers
+docker compose -f docker-compose.prod.yml up -d
+
+# Seed the development database
+npm run seed:dev
+
+# Visit the storefront:
+# http://localhost
+```
+
+#### Option 2: Running Frontend & Backend Standalone (Local Dev Servers)
+
+```bash
+# Terminal 1: Backend API (runs on http://localhost:5000)
+cd backend
+npm run dev
+
+# Terminal 2: Frontend Client (runs on http://localhost:5173)
+cd frontend
+npm run dev
+
+# Terminal 3: Seed database (if not already seeded)
+npm run seed:dev
+```
+
+---
+
 ## Running the Platform
 
-### Option A: Running with Docker Compose (Recommended)
+### Option A: Running with Docker Compose (Local Stack)
 
 1. Clone repository and configure environment:
    ```bash
@@ -178,7 +253,7 @@ npm test
    docker compose up --build -d
    ```
 3. Access services:
-   - **Frontend**: `http://localhost:3000`
+   - **Frontend**: `http://localhost:3000` (or `http://localhost` for production compose)
    - **Backend API**: `http://localhost:5000/api/v1`
    - **Liveness Probe**: `http://localhost:5000/api/v1/health/live`
    - **Readiness Probe**: `http://localhost:5000/api/v1/health/ready`

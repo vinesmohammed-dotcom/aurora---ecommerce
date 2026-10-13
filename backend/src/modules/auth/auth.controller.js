@@ -142,10 +142,43 @@ const verifyEmailChange = asyncHandler(async (req, res) => {
   new ApiResponse(HTTP_CODES.OK, { user: result.user }, result.message).send(res);
 });
 
+/**
+ * Google OAuth Sign-In & Registration
+ * POST /api/v1/auth/google
+ */
+const googleAuth = asyncHandler(async (req, res, next) => {
+  const { user, isNew } = await AuthService.googleAuth({
+    credential: req.body.credential,
+    referralCode: req.body.referralCode
+  });
+
+  // Regenerate session ID to prevent session fixation attacks
+  req.session.regenerate((err) => {
+    if (err) {
+      return next(err);
+    }
+    req.session.userId = user._id;
+    req.session.role = user.role;
+    req.session.authTime = Date.now();
+
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        return next(saveErr);
+      }
+      new ApiResponse(
+        isNew ? HTTP_CODES.CREATED : HTTP_CODES.OK,
+        { user },
+        isNew ? "Account created and signed in via Google successfully." : "Signed in via Google successfully."
+      ).send(res);
+    });
+  });
+});
+
 module.exports = {
   register,
   verifyOtp,
   login,
+  googleAuth,
   logout,
   getCurrentUser,
   forgotPassword,

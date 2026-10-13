@@ -48,7 +48,9 @@ services:
       start_period: 15s
     stop_grace_period: 15s
     networks:
-      - aurora-prod-net
+      aurora-prod-net:
+        aliases:
+          - backend
     logging:
       driver: "json-file"
       options:

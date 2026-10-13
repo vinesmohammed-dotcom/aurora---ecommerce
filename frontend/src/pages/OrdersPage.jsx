@@ -90,13 +90,19 @@ export default function OrdersPage() {
     }
   };
 
-  const fetchOrders = async () => {
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
+
+  const fetchOrders = async (targetPage = page) => {
     try {
       setIsLoading(true);
       setError("");
-      const res = await api.get("/orders");
+      const res = await api.get(`/orders?page=${targetPage}&limit=10`);
       if (res.success && res.data) {
         setOrders(res.data.orders || []);
+        if (res.data.pagination) {
+          setPagination(res.data.pagination);
+        }
       }
     } catch (err) {
       setError(err.message || "Failed to load orders.");
@@ -106,8 +112,8 @@ export default function OrdersPage() {
   };
 
   useEffect(() => {
-    fetchOrders();
-  }, []);
+    fetchOrders(page);
+  }, [page]);
 
   const handleOpenCancelModal = (order) => {
     setCancellingOrderId(order._id);
@@ -403,6 +409,36 @@ export default function OrdersPage() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {/* Pagination Controls */}
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between border-t border-slate-200 pt-6 px-2 text-xs text-slate-500">
+          <span>
+            Showing page {pagination.page} of {pagination.totalPages} ({pagination.total} total orders)
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1 || isLoading}
+              onClick={() => setPage((p) => Math.max(p - 1, 1))}
+            >
+              Previous
+            </Button>
+            <span className="px-3 py-1 font-semibold text-slate-700 bg-slate-100 rounded">
+              {page} / {pagination.totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= pagination.totalPages || isLoading}
+              onClick={() => setPage((p) => Math.min(p + 1, pagination.totalPages))}
+            >
+              Next
+            </Button>
+          </div>
         </div>
       )}
 

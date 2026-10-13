@@ -6,11 +6,30 @@ import Badge from "../../components/ui/Badge";
 import Card from "../../components/ui/Card";
 
 const ALLOWED_TRANSITIONS = {
+  PENDING: ["CONFIRMED", "CANCELLED"],
   CONFIRMED: ["PROCESSING", "CANCELLED"],
   PROCESSING: ["SHIPPED", "CANCELLED"],
   SHIPPED: ["DELIVERED"],
   DELIVERED: [],
-  CANCELLED: []
+  CANCELLED: [],
+  RETURN_REQUESTED: [],
+  RETURN_APPROVED: [],
+  RETURN_RECEIVED: [],
+  RETURN_INSPECTED: [],
+  RETURNED: [],
+  RETURN_REJECTED: []
+};
+
+const getAvailableTransitions = (order) => {
+  if (!order) return [];
+  if (order.orderStatus === "PENDING") {
+    // Online orders that are not completed cannot be advanced to CONFIRMED manually
+    if (order.paymentMethod === "ONLINE_RAZORPAY" && order.paymentStatus !== "COMPLETED") {
+      return ["CANCELLED"];
+    }
+    return ["CONFIRMED", "CANCELLED"];
+  }
+  return ALLOWED_TRANSITIONS[order.orderStatus] || [];
 };
 
 export default function AdminOrdersPage() {
@@ -44,6 +63,8 @@ export default function AdminOrdersPage() {
 
   const getStatusBadge = (status) => {
     switch (status) {
+      case "PENDING":
+        return <Badge variant="warning">Pending</Badge>;
       case "CONFIRMED":
         return <Badge variant="info">Confirmed</Badge>;
       case "PROCESSING":
@@ -54,6 +75,18 @@ export default function AdminOrdersPage() {
         return <Badge variant="success">Delivered</Badge>;
       case "CANCELLED":
         return <Badge variant="danger">Cancelled</Badge>;
+      case "RETURN_REQUESTED":
+        return <Badge variant="warning">Return Requested</Badge>;
+      case "RETURN_APPROVED":
+        return <Badge variant="info">Return Approved</Badge>;
+      case "RETURN_RECEIVED":
+        return <Badge variant="info">Return Received</Badge>;
+      case "RETURN_INSPECTED":
+        return <Badge variant="warning">Return Inspected</Badge>;
+      case "RETURN_REJECTED":
+        return <Badge variant="danger">Return Rejected</Badge>;
+      case "RETURNED":
+        return <Badge variant="neutral">Returned</Badge>;
       default:
         return <Badge>{status}</Badge>;
     }
@@ -88,7 +121,7 @@ export default function AdminOrdersPage() {
 
   const handleOpenStatusModal = (order) => {
     setUpdatingOrderId(order._id);
-    const transitions = ALLOWED_TRANSITIONS[order.orderStatus] || [];
+    const transitions = getAvailableTransitions(order);
     setNewStatus(transitions[0] || "");
     setStatusNote("");
   };
@@ -189,7 +222,7 @@ export default function AdminOrdersPage() {
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {orders.map((order) => {
-                  const allowed = ALLOWED_TRANSITIONS[order.orderStatus] || [];
+                  const allowed = getAvailableTransitions(order);
                   const hasTransitions = allowed.length > 0;
 
                   return (
@@ -259,9 +292,9 @@ export default function AdminOrdersPage() {
                   onChange={(e) => setNewStatus(e.target.value)}
                   className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
                 >
-                  {ALLOWED_TRANSITIONS[
-                    orders.find((o) => o._id === updatingOrderId)?.orderStatus
-                  ]?.map((status) => (
+                  {getAvailableTransitions(
+                    orders.find((o) => o._id === updatingOrderId)
+                  ).map((status) => (
                     <option key={status} value={status}>{status}</option>
                   ))}
                 </select>

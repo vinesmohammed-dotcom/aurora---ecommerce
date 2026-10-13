@@ -11,7 +11,13 @@ const passwordRule = z
 const registerSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters").max(50, "Name cannot exceed 50 characters"),
   email: z.string().trim().email("Please provide a valid email address").toLowerCase(),
-  password: passwordRule
+  password: passwordRule,
+  referralCode: z.string().trim().max(20).optional()
+});
+
+const googleAuthSchema = z.object({
+  credential: z.string().min(10, "Google ID token credential is required"),
+  referralCode: z.string().trim().max(20).optional()
 });
 
 const verifyOtpSchema = z.object({
@@ -53,6 +59,7 @@ const verifyEmailChangeSchema = z.object({
 
 module.exports = {
   registerSchema,
+  googleAuthSchema,
   verifyOtpSchema,
   loginSchema,
   forgotPasswordSchema,

@@ -8,6 +8,7 @@ import AdminRoute from "../components/auth/AdminRoute";
 import HomePage from "../pages/HomePage";
 import LoginPage from "../pages/LoginPage";
 import RegisterPage from "../pages/RegisterPage";
+import ForgotPasswordPage from "../pages/ForgotPasswordPage";
 import ShopPage from "../pages/ShopPage";
 import ProductDetailPage from "../pages/ProductDetailPage";
 import CartPage from "../pages/CartPage";
@@ -35,6 +36,7 @@ const AdminOffersPage = React.lazy(() => import("../pages/admin/AdminOffersPage"
 const AdminCouponsPage = React.lazy(() => import("../pages/admin/AdminCouponsPage"));
 const AdminUsersPage = React.lazy(() => import("../pages/admin/AdminUsersPage"));
 const AdminAuditLogsPage = React.lazy(() => import("../pages/admin/AdminAuditLogsPage"));
+const AdminReviewsPage = React.lazy(() => import("../pages/admin/AdminReviewsPage"));
 
 /**
  * Application Route Tree
@@ -50,6 +52,7 @@ export const router = createBrowserRouter([
       { index: true, element: <HomePage /> },
       { path: "login", element: <LoginPage /> },
       { path: "register", element: <RegisterPage /> },
+      { path: "forgot-password", element: <ForgotPasswordPage /> },
       { path: "shop", element: <ShopPage /> },
       { path: "products", element: <ShopPage /> },
       { path: "products/:slug", element: <ProductDetailPage /> },
@@ -87,7 +90,8 @@ export const router = createBrowserRouter([
           { path: "offers", element: <AdminOffersPage /> },
           { path: "coupons", element: <AdminCouponsPage /> },
           { path: "users", element: <AdminUsersPage /> },
-          { path: "audit-logs", element: <AdminAuditLogsPage /> }
+          { path: "audit-logs", element: <AdminAuditLogsPage /> },
+          { path: "reviews", element: <AdminReviewsPage /> }
         ]
       }
     ]

@@ -54,7 +54,8 @@ const walletTransactionSchema = new mongoose.Schema(
         "PROMOTIONAL_CREDIT",
         "ORDER_CANCELLATION_CREDIT",
         "RETURN_CREDIT",
-        "WALLET_PAYMENT"
+        "WALLET_PAYMENT",
+        "REFERRAL_REWARD"
       ],
       required: [true, "Reference type is required"]
     },

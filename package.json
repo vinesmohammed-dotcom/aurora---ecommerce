@@ -1,0 +1,11 @@
+{
+  "name": "aurora-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aurora E-Commerce Platform Root Workspace",
+  "scripts": {
+    "seed:dev": "npm --prefix backend run seed:dev",
+    "test": "npm --prefix backend test",
+    "build": "npm --prefix frontend run build"
+  }
+}

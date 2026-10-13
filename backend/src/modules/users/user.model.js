@@ -20,8 +20,36 @@ const userSchema = new mongoose.Schema(
     },
     passwordHash: {
       type: String,
-      required: [true, "Password is required"],
+      required: function () {
+        return !this.googleId;
+      },
       select: false // Never return passwordHash in queries by default
+    },
+    googleId: {
+      type: String,
+      sparse: true,
+      unique: true
+    },
+    authProvider: {
+      type: String,
+      enum: ["LOCAL", "GOOGLE"],
+      default: "LOCAL"
+    },
+    avatar: {
+      type: String,
+      default: null
+    },
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+      uppercase: true,
+      trim: true
+    },
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null
     },
     role: {
       type: String,
@@ -55,6 +83,15 @@ const userSchema = new mongoose.Schema(
     }
   }
 );
+
+// Auto-generate unique referral code if missing
+userSchema.pre("save", function (next) {
+  if (!this.referralCode) {
+    const randomHex = Math.random().toString(36).substring(2, 8).toUpperCase();
+    this.referralCode = `AUR-${randomHex}`;
+  }
+  next();
+});
 
 // Indexes
 userSchema.index({ role: 1 });

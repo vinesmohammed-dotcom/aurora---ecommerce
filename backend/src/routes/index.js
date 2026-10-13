@@ -16,6 +16,11 @@ const paymentRoutes = require("../modules/payments/payment.routes");
 const { walletRouter, adminWalletRouter } = require("../modules/wallet/wallet.routes");
 const { refundRouter, adminRefundRouter } = require("../modules/refunds/refund.routes");
 const reportRouter = require("../modules/reports/report.routes");
+const {
+  productReviewRouter,
+  reviewRouter,
+  adminReviewRouter
+} = require("../modules/reviews/review.routes");
 
 const apiRouter = Router();
 
@@ -35,6 +40,10 @@ apiRouter.use("/wishlist", wishlistRoutes);
 
 // Customer Wallet & Append-Only Ledger
 apiRouter.use("/wallet", walletRouter);
+
+// Customer Product Reviews & Ratings Endpoints
+apiRouter.use("/products/:productId/reviews", productReviewRouter);
+apiRouter.use("/reviews", reviewRouter);
 
 // Public Catalog Endpoints
 apiRouter.use("/categories", publicCategoryRouter);
@@ -62,6 +71,7 @@ apiRouter.use("/admin/users", adminUserRouter);
 apiRouter.use("/admin/categories", adminCategoryRouter);
 apiRouter.use("/admin/brands", adminBrandRouter);
 apiRouter.use("/admin/products", adminProductRouter);
+apiRouter.use("/admin/reviews", adminReviewRouter);
 apiRouter.use("/admin/offers", adminOfferRouter);
 apiRouter.use("/admin/coupons", adminCouponRouter);
 apiRouter.use("/admin/orders", adminOrderRouter);

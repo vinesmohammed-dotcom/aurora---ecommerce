@@ -24,7 +24,12 @@ const configureSession = () => {
     store: storeOptions,
     cookie: {
       httpOnly: true, // Prevents client-side scripts from reading the cookie
-      secure: env.isProduction, // In production HTTPS is mandatory; false in local dev
+      secure:
+        process.env.COOKIE_SECURE !== undefined
+          ? process.env.COOKIE_SECURE === "true"
+          : (env.isProduction &&
+              !env.FRONTEND_URL?.startsWith("http://localhost") &&
+              !env.FRONTEND_URL?.startsWith("http://127.0.0.1")), // In production HTTPS is mandatory; false in local HTTP/dev
       sameSite: "lax", // Protects against CSRF on cross-site requests
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
     }

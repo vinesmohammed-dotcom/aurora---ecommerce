@@ -11,8 +11,29 @@ class AuthService {
   /**
    * Register a new user and dispatch verification OTP
    */
-  static async register({ name, email, password }) {
+  static async register({ name, email, password, referralCode }) {
     const existingUser = await User.findOne({ email });
+
+    let referredBy = null;
+    if (referralCode && referralCode.trim()) {
+      const code = referralCode.trim().toUpperCase();
+      const referrer = await User.findOne({ referralCode: code, isVerified: true, isBlocked: false });
+      if (!referrer) {
+        throw new AppError(
+          "Invalid or inactive referral code.",
+          HTTP_CODES.BAD_REQUEST,
+          ERROR_CODES.VALIDATION_ERROR
+        );
+      }
+      if (referrer.email.toLowerCase() === email.toLowerCase()) {
+        throw new AppError(
+          "You cannot use your own referral code.",
+          HTTP_CODES.BAD_REQUEST,
+          ERROR_CODES.VALIDATION_ERROR
+        );
+      }
+      referredBy = referrer._id;
+    }
 
     if (existingUser) {
       if (existingUser.isVerified) {
@@ -25,6 +46,7 @@ class AuthService {
       // If user exists but is unverified, update their details and re-issue OTP
       existingUser.name = name;
       existingUser.passwordHash = await User.hashPassword(password);
+      if (referredBy) existingUser.referredBy = referredBy;
       await existingUser.save();
     } else {
       const passwordHash = await User.hashPassword(password);
@@ -32,7 +54,8 @@ class AuthService {
         name,
         email,
         passwordHash,
-        isVerified: false
+        isVerified: false,
+        referredBy
       });
     }
 
@@ -139,6 +162,35 @@ class AuthService {
       }
       user.isVerified = true;
       await user.save();
+
+      // If user was referred, issue referral welcome bonus and referrer reward
+      if (user.referredBy) {
+        try {
+          const WalletService = require("../wallet/wallet.service");
+          // Credit new user: ₹100 (10,000 paise)
+          await WalletService.creditWallet({
+            userId: user._id,
+            amount: 10000,
+            referenceType: "REFERRAL_REWARD",
+            referenceId: `ref_welcome_${user._id}`,
+            description: "Welcome referral bonus credits",
+            metadata: { referrerId: user.referredBy }
+          });
+
+          // Credit referrer: ₹100 (10,000 paise)
+          await WalletService.creditWallet({
+            userId: user.referredBy,
+            amount: 10000,
+            referenceType: "REFERRAL_REWARD",
+            referenceId: `ref_reward_${user.referredBy}_${user._id}`,
+            description: `Referral reward for inviting ${user.name}`,
+            metadata: { referredUserId: user._id }
+          });
+        } catch (walletErr) {
+          console.warn("[Referral Credit Notice]", walletErr.message);
+        }
+      }
+
       return { user, message: "Account verified successfully." };
     }
 
@@ -359,6 +411,147 @@ class AuthService {
     );
 
     return { user: updatedUser, message: "Email address updated successfully." };
+  }
+
+  /**
+   * Cryptographically verify Google ID Token with Google OAuth2 API
+   */
+  static async verifyGoogleIdToken(token) {
+    if (!token || typeof token !== "string") {
+      throw new AppError("Google ID token is required.", HTTP_CODES.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+    }
+
+    let payload;
+    try {
+      const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`);
+      if (!response.ok) {
+        throw new AppError("Invalid or expired Google credential token.", HTTP_CODES.UNAUTHORIZED, ERROR_CODES.UNAUTHORIZED);
+      }
+      payload = await response.json();
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      throw new AppError(`Google verification service unavailable: ${err.message}`, HTTP_CODES.BAD_GATEWAY, ERROR_CODES.UNKNOWN_ERROR);
+    }
+
+    // Verify token issuer
+    const validIssuers = ["accounts.google.com", "https://accounts.google.com"];
+    if (!validIssuers.includes(payload.iss)) {
+      throw new AppError("Invalid Google token issuer.", HTTP_CODES.UNAUTHORIZED, ERROR_CODES.UNAUTHORIZED);
+    }
+
+    // Verify audience against configured environment variable if available
+    const expectedClientId = process.env.GOOGLE_CLIENT_ID;
+    if (expectedClientId && payload.aud !== expectedClientId) {
+      throw new AppError("Google client ID audience mismatch.", HTTP_CODES.UNAUTHORIZED, ERROR_CODES.UNAUTHORIZED);
+    }
+
+    // Verify expiration timestamp
+    if (payload.exp && Date.now() >= parseInt(payload.exp, 10) * 1000) {
+      throw new AppError("Google ID token has expired.", HTTP_CODES.UNAUTHORIZED, ERROR_CODES.UNAUTHORIZED);
+    }
+
+    // Verify that the email is verified by Google
+    if (!payload.email || (payload.email_verified !== "true" && payload.email_verified !== true)) {
+      throw new AppError("Google account email is not verified.", HTTP_CODES.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+    }
+
+    return payload;
+  }
+
+  /**
+   * Google Sign-In: Authenticate or register customer safely with identity matching
+   */
+  static async googleAuth({ credential, referralCode }) {
+    const payload = await this.verifyGoogleIdToken(credential);
+    const email = payload.email.toLowerCase().trim();
+    const googleId = payload.sub;
+
+    // Check if user already exists by googleId or by email
+    let user = await User.findOne({
+      $or: [{ googleId }, { email }]
+    });
+
+    if (user) {
+      if (user.isBlocked) {
+        throw new AppError(
+          "Your account has been suspended by an administrator.",
+          HTTP_CODES.FORBIDDEN,
+          ERROR_CODES.FORBIDDEN
+        );
+      }
+
+      // Safe identity linking: link googleId and avatar if not yet linked
+      let hasChanges = false;
+      if (!user.googleId) {
+        user.googleId = googleId;
+        user.authProvider = "GOOGLE";
+        hasChanges = true;
+      }
+      if (!user.isVerified) {
+        user.isVerified = true;
+        hasChanges = true;
+      }
+      if (!user.avatar && payload.picture) {
+        user.avatar = payload.picture;
+        hasChanges = true;
+      }
+
+      if (hasChanges) {
+        await user.save();
+      }
+
+      return { user, isNew: false };
+    }
+
+    // New User registration via Google OAuth
+    let referredBy = null;
+    if (referralCode && referralCode.trim()) {
+      const code = referralCode.trim().toUpperCase();
+      const referrer = await User.findOne({ referralCode: code, isVerified: true, isBlocked: false });
+      if (referrer && referrer.email.toLowerCase() !== email) {
+        referredBy = referrer._id;
+      }
+    }
+
+    user = await User.create({
+      name: payload.name || "Google User",
+      email,
+      googleId,
+      authProvider: "GOOGLE",
+      avatar: payload.picture || null,
+      isVerified: true,
+      role: "USER",
+      referredBy
+    });
+
+    // Credit referral rewards atomically if registered with referral code
+    if (referredBy) {
+      try {
+        const WalletService = require("../wallet/wallet.service");
+        await Promise.all([
+          WalletService.creditWallet({
+            userId: user._id,
+            amount: 10000,
+            referenceType: "REFERRAL_REWARD",
+            referenceId: `ref_welcome_${user._id}`,
+            description: "Welcome referral bonus credits",
+            metadata: { referrerId: referredBy }
+          }),
+          WalletService.creditWallet({
+            userId: referredBy,
+            amount: 10000,
+            referenceType: "REFERRAL_REWARD",
+            referenceId: `ref_reward_${referredBy}_${user._id}`,
+            description: `Referral reward for inviting ${user.name}`,
+            metadata: { referredUserId: user._id }
+          })
+        ]);
+      } catch (walletErr) {
+        console.warn("[Referral Credit Notice]", walletErr.message);
+      }
+    }
+
+    return { user, isNew: true };
   }
 }
 

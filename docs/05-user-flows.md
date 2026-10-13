@@ -108,3 +108,28 @@ flowchart TD
 - Customer clicks "Download Tax Invoice" on order detail view.
 - Client triggers `GET /api/v1/orders/:id/invoice`.
 - Server streams pre-generated PDF from AWS S3 or generates on-the-fly with complete tax breakdown.
+
+### 5.4 Customer Product Ratings & Verified Reviews Flow
+
+```mermaid
+flowchart TD
+    Buy[Customer purchases product] --> Deliver[Order delivered: status DELIVERED]
+    Deliver --> ViewProduct[Customer opens product page /products/:slug]
+    ViewProduct --> VerifyBackend{Backend verifies purchase?}
+    VerifyBackend -- No Delivered Order / Already Reviewed --> ReadOnly[Read existing reviews & aggregate rating]
+    VerifyBackend -- Eligible Delivered Order Found --> ShowWriteBtn[Display 'Write a Review' action]
+    ShowWriteBtn --> OpenModal[Open review dialog: 1-5 stars, headline, comment]
+    OpenModal --> SubmitReview[POST /api/v1/products/:id/reviews]
+    SubmitReview --> ServerValidation[Server validates rating, text, and re-verifies ownership]
+    ServerValidation --> StoreReview[Review stored with isVerifiedPurchase=true & status=PUBLISHED]
+    StoreReview --> UpdateAgg[MongoDB $facet aggregation updates average & distribution]
+    UpdateAgg --> Display[Verified Review displayed on product page with badge]
+```
+
+#### Core Distinction:
+- **Authentication**: Who the customer is (valid identity session).
+- **Authorization**: What the customer is allowed to do (RBAC roles, resource ownership).
+- **Verified Purchase**: Backend confirms the customer actually bought and received the product (`DELIVERED` state).
+
+For full architectural details, see [29-ratings-and-reviews.md](./29-ratings-and-reviews.md).
+

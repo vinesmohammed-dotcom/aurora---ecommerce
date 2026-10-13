@@ -5,6 +5,7 @@ const { requireAuth } = require("../../middlewares/auth.middleware");
 const { authLimiter, otpLimiter } = require("../../middlewares/rateLimiter.middleware");
 const {
   registerSchema,
+  googleAuthSchema,
   verifyOtpSchema,
   loginSchema,
   forgotPasswordSchema,
@@ -20,6 +21,7 @@ const router = Router();
 router.post("/register", otpLimiter, validate(registerSchema), authController.register);
 router.post("/verify-otp", otpLimiter, validate(verifyOtpSchema), authController.verifyOtp);
 router.post("/login", authLimiter, validate(loginSchema), authController.login);
+router.post("/google", authLimiter, validate(googleAuthSchema), authController.googleAuth);
 router.post("/logout", authController.logout);
 router.post("/forgot-password", authLimiter, validate(forgotPasswordSchema), authController.forgotPassword);
 router.post("/reset-password", authLimiter, validate(resetPasswordSchema), authController.resetPassword);

@@ -15,6 +15,9 @@ const apiRouter = require("./routes");
  */
 const app = express();
 
+// Trust reverse proxy (e.g. Nginx, ALB) for accurate protocol and client IP detection
+app.set("trust proxy", 1);
+
 // 1. Security Headers via Helmet with explicit Razorpay directives & HSTS
 app.use(
   helmet({

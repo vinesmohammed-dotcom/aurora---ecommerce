@@ -97,10 +97,31 @@ const webhookLimiter = rateLimit({
   }
 });
 
+/**
+ * Rate Limiter for Review Submissions
+ * Prevents review bombing and automated spam attacks.
+ */
+const reviewLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.isDevelopment || env.isTest ? 1000 : 30, // 30 reviews per 15 min in prod
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(HTTP_CODES.TOO_MANY_REQUESTS).json({
+      success: false,
+      message: "Too many review submissions. Please wait before submitting more reviews.",
+      code: ERROR_CODES.RATE_LIMIT_EXCEEDED,
+      errors: []
+    });
+  }
+});
+
 module.exports = {
   apiRateLimiter,
   authLimiter,
   otpLimiter,
   paymentLimiter,
-  webhookLimiter
+  webhookLimiter,
+  reviewLimiter
 };
+

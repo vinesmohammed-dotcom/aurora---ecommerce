@@ -2,11 +2,13 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import { toggleCartDrawer } from "../../store/slices/cartSlice";
+import { useLogout } from "../../features/auth/useLogout";
 
 export default function Navbar() {
   const dispatch = useDispatch();
   const { isAuthenticated, user } = useSelector((state) => state.auth);
   const { itemCount } = useSelector((state) => state.cart);
+  const { handleLogout } = useLogout();
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80">
@@ -89,12 +91,22 @@ export default function Navbar() {
           </Link>
 
           {isAuthenticated ? (
-            <Link
-              to="/profile"
-              className="text-sm font-medium text-slate-700 hover:text-slate-900 border border-slate-200 rounded-lg px-3 py-1.5"
-            >
-              {user?.name || "Account"}
-            </Link>
+            <div className="flex items-center space-x-2">
+              <Link
+                to="/profile"
+                title={user?.name || "Account"}
+                className="text-sm font-medium text-slate-700 hover:text-slate-900 border border-slate-200 rounded-lg px-3 py-1.5 max-w-[120px] truncate"
+              >
+                {user?.name || "Account"}
+              </Link>
+              <button
+                type="button"
+                onClick={() => handleLogout()}
+                className="text-sm font-medium text-slate-600 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg px-3 py-1.5 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
           ) : (
             <Link
               to="/login"
