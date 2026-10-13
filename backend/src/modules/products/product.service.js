@@ -6,6 +6,7 @@ const AppError = require("../../utils/AppError");
 const HTTP_CODES = require("../../constants/httpCodes");
 const ERROR_CODES = require("../../constants/errorCodes");
 const { SORT_OPTIONS } = require("./product.validator");
+const ReviewService = require("../reviews/review.service");
 
 class ProductService {
   /**
@@ -123,10 +124,15 @@ class ProductService {
       Product.countDocuments(query)
     ]);
 
-    // Filter out inactive variants from public view
+    // Fetch batch rating summaries for all products on the current page
+    const productIds = products.map((p) => p._id);
+    const ratingSummaries = await ReviewService.getBatchRatingSummaries(productIds);
+
+    // Filter out inactive variants from public view and attach rating summary
     const sanitizedProducts = products.map((p) => ({
       ...p,
-      variants: (p.variants || []).filter((v) => v.isActive)
+      variants: (p.variants || []).filter((v) => v.isActive),
+      rating: ratingSummaries[p._id.toString()] || { average: 0, count: 0 }
     }));
 
     return {
@@ -183,7 +189,71 @@ class ProductService {
       throw new AppError("Product is currently unavailable.", HTTP_CODES.NOT_FOUND, ERROR_CODES.NOT_FOUND);
     }
 
+    const ratingSummary = await ReviewService.getProductRatingSummary(product._id);
+    product.rating = {
+      average: ratingSummary.average,
+      count: ratingSummary.count,
+      distribution: ratingSummary.distribution
+    };
+    product.ratingSummary = ratingSummary;
+
     return product;
+  }
+
+  /**
+   * Public: Get related products based on category, brand, or tags
+   * Excludes current product, conceals costPrice, and attaches rating summary.
+   */
+  static async getRelatedProducts(productIdOrSlug, { limit = 4 } = {}) {
+    let currentProduct = null;
+    if (mongoose.Types.ObjectId.isValid(productIdOrSlug)) {
+      currentProduct = await Product.findById(productIdOrSlug).lean();
+    }
+    if (!currentProduct) {
+      currentProduct = await Product.findOne({ slug: String(productIdOrSlug).toLowerCase().trim() }).lean();
+    }
+    if (!currentProduct) {
+      return [];
+    }
+
+    const safeLimit = Math.min(20, Math.max(1, parseInt(limit, 10) || 4));
+
+    const orClauses = [];
+    if (currentProduct.category) {
+      orClauses.push({ category: currentProduct.category });
+    }
+    if (currentProduct.brand) {
+      orClauses.push({ brand: currentProduct.brand });
+    }
+    if (Array.isArray(currentProduct.tags) && currentProduct.tags.length > 0) {
+      orClauses.push({ tags: { $in: currentProduct.tags } });
+    }
+
+    const query = {
+      _id: { $ne: currentProduct._id },
+      isActive: true
+    };
+
+    if (orClauses.length > 0) {
+      query.$or = orClauses;
+    }
+
+    const related = await Product.find(query)
+      .select("-variants.costPrice")
+      .populate("brand", "name slug")
+      .populate("category", "name slug")
+      .sort({ createdAt: -1 })
+      .limit(safeLimit)
+      .lean();
+
+    const productIds = related.map((p) => p._id);
+    const ratingSummaries = await ReviewService.getBatchRatingSummaries(productIds);
+
+    return related.map((p) => ({
+      ...p,
+      variants: (p.variants || []).filter((v) => v.isActive),
+      rating: ratingSummaries[p._id.toString()] || { average: 0, count: 0 }
+    }));
   }
 
   /**

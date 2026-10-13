@@ -24,6 +24,7 @@ const validateQuery = (schema) => (req, res, next) => {
 // Public catalog routes: /api/v1/products
 const publicProductRouter = Router();
 publicProductRouter.get("/", validateQuery(queryProductSchema), productController.getPublicProducts);
+publicProductRouter.get("/:slug/related", productController.getRelatedProducts);
 publicProductRouter.get("/:slug", productController.getPublicProductBySlug);
 
 // Admin catalog routes: /api/v1/admin/products

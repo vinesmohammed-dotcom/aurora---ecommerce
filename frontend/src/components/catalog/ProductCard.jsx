@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import PriceDisplay from "./PriceDisplay";
+import StarRating from "../../features/reviews/StarRating";
 import { Package, ArrowRight } from "lucide-react";
 
 export default function ProductCard({ product }) {
@@ -58,6 +59,23 @@ export default function ProductCard({ product }) {
         >
           {name}
         </Link>
+
+        {/* Rating Summary */}
+        <div className="mt-1.5 flex items-center gap-1.5 text-xs">
+          {product.rating && product.rating.count > 0 ? (
+            <>
+              <StarRating rating={product.rating.average} size="sm" readOnly />
+              <span className="font-semibold text-slate-700">
+                {product.rating.average.toFixed(1)}
+              </span>
+              <span className="text-slate-400">
+                ({product.rating.count})
+              </span>
+            </>
+          ) : (
+            <span className="text-slate-400">No reviews</span>
+          )}
+        </div>
 
         <div className="mt-auto pt-4 flex items-center justify-between border-t border-slate-100">
           <div>

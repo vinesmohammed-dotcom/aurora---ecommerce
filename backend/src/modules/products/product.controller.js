@@ -22,6 +22,15 @@ const getPublicProductBySlug = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Public: Get related products
+ * GET /api/v1/products/:slug/related
+ */
+const getRelatedProducts = asyncHandler(async (req, res) => {
+  const related = await ProductService.getRelatedProducts(req.params.slug, req.query);
+  new ApiResponse(HTTP_CODES.OK, related, "Related products fetched successfully.").send(res);
+});
+
+/**
  * Admin: Get paginated products for dashboard
  * GET /api/v1/admin/products
  */
@@ -105,6 +114,7 @@ const getInventoryAdmin = asyncHandler(async (req, res) => {
 module.exports = {
   getPublicProducts,
   getPublicProductBySlug,
+  getRelatedProducts,
   getAdminProducts,
   getAdminProductById,
   getInventoryAdmin,
