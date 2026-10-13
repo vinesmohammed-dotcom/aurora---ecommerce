@@ -388,6 +388,19 @@ class OrderService {
       );
     }
 
+    // Guard: Prevent manual fulfillment bypass for unpaid online payment orders
+    if (
+      order.paymentMethod === "ONLINE_RAZORPAY" &&
+      order.paymentStatus !== "COMPLETED" &&
+      ["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED"].includes(newStatus)
+    ) {
+      throw new AppError(
+        `Cannot advance order status to '${newStatus}' for unpaid online payment order. Current payment status is '${order.paymentStatus}'.`,
+        HTTP_CODES.BAD_REQUEST,
+        ERROR_CODES.VALIDATION_ERROR
+      );
+    }
+
     // If transitioning to CANCELLED, restore stock
     if (newStatus === "CANCELLED") {
       for (const item of order.items) {
@@ -399,6 +412,13 @@ class OrderService {
       }
       order.cancelledAt = new Date();
       order.cancellationReason = note || "Cancelled by administrator";
+
+      // Synchronize payment status: if captured/completed, mark REFUND_REQUIRED
+      if (order.paymentMethod === "ONLINE_RAZORPAY" && order.paymentStatus === "COMPLETED") {
+        order.paymentStatus = "REFUND_REQUIRED";
+      } else if (order.paymentStatus === "PENDING") {
+        order.paymentStatus = "FAILED";
+      }
     }
 
     // If COD order reaches DELIVERED, paymentStatus automatically transitions to COMPLETED
