@@ -74,6 +74,39 @@ class AuditLogger {
     console.log(`[AUDIT] ${JSON.stringify(event)}`);
     return event;
   }
+
+  static logInventoryAction({
+    action = "ADMIN_INVENTORY_ADJUSTMENT",
+    adminId,
+    productId,
+    variantId,
+    sku,
+    oldStock,
+    newStock,
+    adjustmentType,
+    quantity,
+    reason,
+    notes = ""
+  }) {
+    const event = {
+      timestamp: new Date().toISOString(),
+      eventType: "INVENTORY_AUDIT",
+      action,
+      adminId: adminId ? adminId.toString() : null,
+      productId: productId ? productId.toString() : null,
+      variantId: variantId ? variantId.toString() : null,
+      sku: sku ? String(sku).toUpperCase() : null,
+      oldStock,
+      newStock,
+      adjustmentType,
+      quantity,
+      reason: reason ? String(reason).trim() : null,
+      notes: notes ? String(notes).trim() : null
+    };
+
+    console.log(`[AUDIT] ${JSON.stringify(event)}`);
+    return event;
+  }
 }
 
 module.exports = AuditLogger;

@@ -268,9 +268,30 @@ class OrderService {
         note: reason
       });
 
+      // For prepaid orders where payment was completed, flag for gateway refund reconciliation
+      if (order.paymentMethod === "ONLINE_RAZORPAY" && order.paymentStatus === "COMPLETED") {
+        order.paymentStatus = "REFUND_REQUIRED";
+        order.statusHistory.push({
+          status: "CANCELLED",
+          changedAt: new Date(),
+          note: "Order cancelled post-payment. Flagged as REFUND_REQUIRED for gateway refund settlement."
+        });
+
+        await Payment.updateMany(
+          {
+            orderId: order._id,
+            status: "CAPTURED"
+          },
+          {
+            $set: { reconciliationStatus: "REFUND_REQUIRED" }
+          },
+          session ? { session } : {}
+        );
+      }
+
       await order.save(session ? { session } : {});
 
-      // Cancel any active payment records attached to this order
+      // Cancel any active/unpaid payment records attached to this order
       await Payment.updateMany(
         {
           orderId: order._id,

@@ -449,5 +449,74 @@ describe("Phase 3 — Product Catalog & Variants (Integration Tests)", () => {
       expect(res.status).toBe(403);
       expect(res.body.code).toBe("FORBIDDEN");
     });
+
+    it("should allow admin to adjust variant inventory stock with reason and audit tracking", async () => {
+      const adjustRes = await request(app)
+        .patch("/api/v1/admin/products/inventory/adjust")
+        .set("Cookie", adminCookie)
+        .send({
+          productId: createdProductId,
+          variantId: createdVariantId,
+          adjustmentType: "INCREMENT",
+          quantity: 15,
+          reason: "RESTOCK",
+          notes: "Inbound warehouse delivery PO-102"
+        });
+
+      expect(adjustRes.status).toBe(200);
+      expect(adjustRes.body.success).toBe(true);
+      expect(adjustRes.body.data.newStock).toBe(35); // 20 initial + 15
+    });
+
+    it("should reject inventory adjustment that would cause negative stock", async () => {
+      const failRes = await request(app)
+        .patch("/api/v1/admin/products/inventory/adjust")
+        .set("Cookie", adminCookie)
+        .send({
+          productId: createdProductId,
+          variantId: createdVariantId,
+          adjustmentType: "DECREMENT",
+          quantity: 9999,
+          reason: "DAMAGED_DISPOSAL"
+        });
+
+      expect(failRes.status).toBe(400);
+      expect(failRes.body.message).toMatch(/cannot decrement stock below zero/i);
+    });
+
+    it("should allow admin to bulk toggle active status of products", async () => {
+      const bulkRes = await request(app)
+        .patch("/api/v1/admin/products/bulk-status")
+        .set("Cookie", adminCookie)
+        .send({
+          productIds: [createdProductId],
+          isActive: false
+        });
+
+      expect(bulkRes.status).toBe(200);
+      expect(bulkRes.body.success).toBe(true);
+      expect(bulkRes.body.data.modifiedCount).toBe(1);
+
+      // Re-activate
+      await request(app)
+        .patch("/api/v1/admin/products/bulk-status")
+        .set("Cookie", adminCookie)
+        .send({
+          productIds: [createdProductId],
+          isActive: true
+        });
+    });
+
+    it("should allow admin to export catalog products as CSV", async () => {
+      const csvRes = await request(app)
+        .get("/api/v1/admin/products/export/csv")
+        .set("Cookie", adminCookie);
+
+      expect(csvRes.status).toBe(200);
+      expect(csvRes.headers["content-type"]).toContain("text/csv");
+      expect(csvRes.text).toContain("Product Name");
+      expect(csvRes.text).toContain("SKU");
+      expect(csvRes.text).toContain("Selling Price (INR)");
+    });
   });
 });

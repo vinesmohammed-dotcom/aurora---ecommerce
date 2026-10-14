@@ -10,6 +10,7 @@ import Product from "../src/modules/products/product.model";
 import Cart from "../src/modules/cart/cart.model";
 import Address from "../src/modules/addresses/address.model";
 import Order from "../src/modules/orders/order.model";
+import Payment from "../src/modules/payments/payment.model";
 import Coupon from "../src/modules/coupons/coupon.model";
 
 describe("Phase 5 — Orders, COD Checkout, State Machine & Idempotency (Integration Tests)", () => {
@@ -290,6 +291,129 @@ describe("Phase 5 — Orders, COD Checkout, State Machine & Idempotency (Integra
       const prod = await Product.findById(product1Id);
       expect(prod.variants.id(variant1Id).stock).toBe(10);
     });
+
+    it("Customer can cancel PENDING order and restore inventory atomically", async () => {
+      const pendingOrder = await Order.create({
+        orderNumber: `ORD-PENDING-${Date.now()}`,
+        userId: userAId,
+        shippingAddress: {
+          fullName: "Customer A",
+          phone: "+91 9123456780",
+          addressLine1: "100 Innovation Drive",
+          city: "Bengaluru",
+          state: "Karnataka",
+          postalCode: "560001",
+          country: "India"
+        },
+        items: [
+          {
+            productId: product1Id,
+            variantId: variant1Id,
+            name: "Product 1",
+            sku: "SKU-PROD-1",
+            slug: "product-1",
+            price: 5000,
+            quantity: 1,
+            unitPrice: 5000,
+            discountedUnitPrice: 5000,
+            itemTotal: 5000
+          }
+        ],
+        priceSummary: {
+          grossSubtotal: 5000,
+          offerDiscountTotal: 0,
+          netSubtotal: 5000,
+          couponDiscount: 0,
+          shippingFee: 0,
+          grandTotal: 5000
+        },
+        paymentMethod: "ONLINE_RAZORPAY",
+        paymentStatus: "PENDING",
+        orderStatus: "PENDING"
+      });
+
+      // Simulate 1 unit stock reservation
+      await Product.updateOne(
+        { _id: product1Id, "variants._id": variant1Id },
+        { $inc: { "variants.$.stock": -1 } }
+      );
+
+      const res = await request(app)
+        .post(`/api/v1/orders/${pendingOrder._id}/cancel`)
+        .set("Cookie", userACookie)
+        .send({ reason: "Customer cancelled before payment" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.order.orderStatus).toBe("CANCELLED");
+
+      const prod = await Product.findById(product1Id);
+      expect(prod.variants.id(variant1Id).stock).toBe(10);
+    });
+
+    it("Prepaid online order cancellation flags paymentStatus as REFUND_REQUIRED and updates Payment reconciliation", async () => {
+      const prepaidOrder = await Order.create({
+        orderNumber: `ORD-PREPAID-${Date.now()}`,
+        userId: userAId,
+        shippingAddress: {
+          fullName: "Customer A",
+          phone: "+91 9123456780",
+          addressLine1: "100 Innovation Drive",
+          city: "Bengaluru",
+          state: "Karnataka",
+          postalCode: "560001",
+          country: "India"
+        },
+        items: [
+          {
+            productId: product1Id,
+            variantId: variant1Id,
+            name: "Product 1",
+            sku: "SKU-PROD-1",
+            slug: "product-1",
+            price: 5000,
+            quantity: 1,
+            unitPrice: 5000,
+            discountedUnitPrice: 5000,
+            itemTotal: 5000
+          }
+        ],
+        priceSummary: {
+          grossSubtotal: 5000,
+          offerDiscountTotal: 0,
+          netSubtotal: 5000,
+          couponDiscount: 0,
+          shippingFee: 0,
+          grandTotal: 5000
+        },
+        paymentMethod: "ONLINE_RAZORPAY",
+        paymentStatus: "COMPLETED",
+        orderStatus: "CONFIRMED"
+      });
+
+      const payment = await Payment.create({
+        orderId: prepaidOrder._id,
+        userId: userAId,
+        gateway: "RAZORPAY",
+        gatewayOrderId: `order_test_${Date.now()}`,
+        gatewayPaymentId: `pay_test_${Date.now()}`,
+        amount: 500000,
+        currency: "INR",
+        status: "CAPTURED",
+        verificationStatus: "VERIFIED"
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/orders/${prepaidOrder._id}/cancel`)
+        .set("Cookie", userACookie)
+        .send({ reason: "Customer requested cancellation for refund" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.order.orderStatus).toBe("CANCELLED");
+      expect(res.body.data.order.paymentStatus).toBe("REFUND_REQUIRED");
+
+      const updatedPayment = await Payment.findById(payment._id);
+      expect(updatedPayment.reconciliationStatus).toBe("REFUND_REQUIRED");
+    });
   });
 
   describe("Admin Order State Machine Transitions", () => {
@@ -330,6 +454,14 @@ describe("Phase 5 — Orders, COD Checkout, State Machine & Idempotency (Integra
       expect(step2.status).toBe(200);
       expect(step2.body.data.order.orderStatus).toBe("SHIPPED");
 
+      // Verify cancellation is rejected once order is SHIPPED
+      const cancelShippedRes = await request(app)
+        .post(`/api/v1/orders/${secondOrderId}/cancel`)
+        .set("Cookie", userACookie)
+        .send({ reason: "Cancelling dispatched order" });
+      expect(cancelShippedRes.status).toBe(400);
+      expect(cancelShippedRes.body.message).toContain("Cannot cancel order with status 'SHIPPED'");
+
       // 3. SHIPPED -> DELIVERED
       const step3 = await request(app)
         .patch(`/api/v1/admin/orders/${secondOrderId}/status`)
@@ -339,6 +471,14 @@ describe("Phase 5 — Orders, COD Checkout, State Machine & Idempotency (Integra
       expect(step3.body.data.order.orderStatus).toBe("DELIVERED");
       // COD paymentStatus automatically completed on delivery!
       expect(step3.body.data.order.paymentStatus).toBe("COMPLETED");
+
+      // Verify cancellation is rejected once order is DELIVERED
+      const cancelDeliveredRes = await request(app)
+        .post(`/api/v1/orders/${secondOrderId}/cancel`)
+        .set("Cookie", userACookie)
+        .send({ reason: "Cancelling delivered order" });
+      expect(cancelDeliveredRes.status).toBe(400);
+      expect(cancelDeliveredRes.body.message).toContain("Cannot cancel order with status 'DELIVERED'");
     });
 
     it("Admin rejects illegal status transition from DELIVERED -> CANCELLED (terminal state)", async () => {

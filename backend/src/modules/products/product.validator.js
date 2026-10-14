@@ -117,6 +117,21 @@ const queryProductSchema = z.object({
     .default(SORT_OPTIONS.NEWEST)
 });
 
+const adjustStockSchema = z.object({
+  productId: z.string().regex(objectIdRegex, "Invalid productId format").optional(),
+  variantId: z.string().regex(objectIdRegex, "Invalid variantId format").optional(),
+  sku: z.string().trim().min(1, "SKU is required").optional(),
+  adjustmentType: z.enum(["SET_ABSOLUTE", "INCREMENT", "DECREMENT"]).default("SET_ABSOLUTE"),
+  quantity: z.number().int().min(0, "Quantity must be a non-negative integer"),
+  reason: z.string().trim().min(3, "Stock adjustment reason must be at least 3 characters"),
+  notes: z.string().trim().optional().default("")
+});
+
+const bulkToggleStatusSchema = z.object({
+  productIds: z.array(z.string().regex(objectIdRegex, "Invalid productId format")).min(1, "Must select at least 1 product"),
+  isActive: z.boolean({ required_error: "Target isActive status boolean is required" })
+});
+
 module.exports = {
   variantInputSchema,
   createProductSchema,
@@ -124,5 +139,7 @@ module.exports = {
   updateVariantSchema,
   toggleProductStatusSchema,
   queryProductSchema,
+  adjustStockSchema,
+  bulkToggleStatusSchema,
   SORT_OPTIONS
 };

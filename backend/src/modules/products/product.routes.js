@@ -8,7 +8,9 @@ const {
   updateVariantSchema,
   toggleProductStatusSchema,
   variantInputSchema,
-  queryProductSchema
+  queryProductSchema,
+  adjustStockSchema,
+  bulkToggleStatusSchema
 } = require("./product.validator");
 
 // Helper for validating query params using Zod
@@ -32,6 +34,9 @@ const adminProductRouter = Router();
 adminProductRouter.use(requireAuth, requireRole("ADMIN"));
 
 adminProductRouter.get("/inventory", productController.getInventoryAdmin);
+adminProductRouter.patch("/inventory/adjust", validate(adjustStockSchema), productController.adjustVariantStockAdmin);
+adminProductRouter.patch("/bulk-status", validate(bulkToggleStatusSchema), productController.bulkToggleStatusAdmin);
+adminProductRouter.get("/export/csv", productController.exportProductsCsvAdmin);
 adminProductRouter.get("/", productController.getAdminProducts);
 adminProductRouter.get("/:id", productController.getAdminProductById);
 adminProductRouter.post("/", validate(createProductSchema), productController.createProduct);

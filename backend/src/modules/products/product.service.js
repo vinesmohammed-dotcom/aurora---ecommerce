@@ -7,6 +7,7 @@ const HTTP_CODES = require("../../constants/httpCodes");
 const ERROR_CODES = require("../../constants/errorCodes");
 const { SORT_OPTIONS } = require("./product.validator");
 const ReviewService = require("../reviews/review.service");
+const AuditLogger = require("../../utils/auditLogger");
 
 class ProductService {
   /**
@@ -387,6 +388,170 @@ class ProductService {
         totalPages: Math.ceil(total / safeLimit) || 1
       }
     };
+  }
+
+  /**
+   * Admin: Authorized Variant Stock Adjustment with reason and audit logging
+   * Enforces non-negative stock and prevents inventory corruption.
+   */
+  static async adjustVariantStockAdmin({
+    productId,
+    variantId,
+    sku,
+    adjustmentType = "SET_ABSOLUTE",
+    quantity,
+    reason,
+    notes = "",
+    adminId
+  }) {
+    if (!reason || !reason.trim()) {
+      throw new AppError("Stock adjustment reason is strictly required for audit tracking.", HTTP_CODES.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+    }
+    const qty = parseInt(quantity, 10);
+    if (isNaN(qty) || qty < 0) {
+      throw new AppError("Quantity must be a non-negative integer.", HTTP_CODES.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+    }
+
+    let query = {};
+    if (productId && variantId) {
+      query = { _id: productId, "variants._id": variantId };
+    } else if (sku) {
+      query = { "variants.sku": sku.toUpperCase().trim() };
+    } else {
+      throw new AppError("Either productId + variantId or SKU is required for stock adjustment.", HTTP_CODES.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+    }
+
+    const product = await Product.findOne(query);
+    if (!product) {
+      throw new AppError("Target product variant not found in catalog.", HTTP_CODES.NOT_FOUND, ERROR_CODES.NOT_FOUND);
+    }
+
+    const variant = product.variants.find((v) =>
+      variantId ? v._id.toString() === variantId.toString() : v.sku.toUpperCase() === sku.toUpperCase().trim()
+    );
+    if (!variant) {
+      throw new AppError("Target variant not found on product.", HTTP_CODES.NOT_FOUND, ERROR_CODES.NOT_FOUND);
+    }
+
+    const oldStock = variant.stock;
+    let newStock = oldStock;
+
+    if (adjustmentType === "SET_ABSOLUTE") {
+      newStock = qty;
+    } else if (adjustmentType === "INCREMENT") {
+      newStock = oldStock + qty;
+    } else if (adjustmentType === "DECREMENT") {
+      if (oldStock - qty < 0) {
+        throw new AppError(`Cannot decrement stock below zero. Current stock is ${oldStock}, requested decrement is ${qty}.`, HTTP_CODES.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+      }
+      newStock = oldStock - qty;
+    } else {
+      throw new AppError("Invalid adjustmentType. Must be SET_ABSOLUTE, INCREMENT, or DECREMENT.", HTTP_CODES.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+    }
+
+    variant.stock = newStock;
+    await product.save();
+
+    // Record audit event
+    AuditLogger.logInventoryAction({
+      action: "ADMIN_INVENTORY_ADJUSTMENT",
+      adminId,
+      productId: product._id,
+      variantId: variant._id,
+      sku: variant.sku,
+      oldStock,
+      newStock,
+      adjustmentType,
+      quantity: qty,
+      reason,
+      notes
+    });
+
+    return {
+      productId: product._id,
+      productName: product.name,
+      variantId: variant._id,
+      sku: variant.sku,
+      oldStock,
+      newStock,
+      reason,
+      notes
+    };
+  }
+
+  /**
+   * Admin: Bulk toggle active status across multiple catalog products
+   */
+  static async bulkToggleStatusAdmin({ productIds, isActive, adminId }) {
+    if (!Array.isArray(productIds) || productIds.length === 0) {
+      throw new AppError("productIds array cannot be empty.", HTTP_CODES.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+    }
+
+    const result = await Product.updateMany(
+      { _id: { $in: productIds } },
+      { $set: { isActive: Boolean(isActive) } }
+    );
+
+    return {
+      matchedCount: result.matchedCount,
+      modifiedCount: result.modifiedCount,
+      isActive: Boolean(isActive)
+    };
+  }
+
+  /**
+   * Admin: Generate RFC 4180 CSV export of entire catalog
+   */
+  static async exportProductsCsvAdmin() {
+    const products = await Product.find({})
+      .populate("category", "name")
+      .populate("brand", "name")
+      .lean();
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const headers = [
+      "Product ID",
+      "Product Name",
+      "Slug",
+      "SKU",
+      "Category",
+      "Brand",
+      "Selling Price (INR)",
+      "Cost Price (INR)",
+      "Stock",
+      "Low Stock Alert",
+      "Active Status"
+    ];
+
+    const rows = [headers.join(",")];
+
+    for (const prod of products) {
+      const categoryName = prod.category ? prod.category.name : "Uncategorized";
+      const brandName = prod.brand ? prod.brand.name : "Generic";
+
+      for (const variant of prod.variants || []) {
+        rows.push([
+          escapeCsv(prod._id),
+          escapeCsv(prod.name),
+          escapeCsv(prod.slug),
+          escapeCsv(variant.sku),
+          escapeCsv(categoryName),
+          escapeCsv(brandName),
+          escapeCsv(variant.price ? variant.price.toFixed(2) : "0.00"),
+          escapeCsv(variant.costPrice ? variant.costPrice.toFixed(2) : "0.00"),
+          escapeCsv(variant.stock),
+          escapeCsv(variant.stock < 10 ? "YES" : "NO"),
+          escapeCsv(prod.isActive && variant.isActive ? "ACTIVE" : "INACTIVE")
+        ].join(","));
+      }
+    }
+
+    return rows.join("\r\n");
   }
 
   /**

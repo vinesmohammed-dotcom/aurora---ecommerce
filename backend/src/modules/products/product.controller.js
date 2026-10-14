@@ -111,6 +111,41 @@ const getInventoryAdmin = asyncHandler(async (req, res) => {
   new ApiResponse(HTTP_CODES.OK, result, "Inventory fetched successfully.").send(res);
 });
 
+/**
+ * Admin: Adjust variant stock with reason and audit log
+ * PATCH /api/v1/admin/products/inventory/adjust
+ */
+const adjustVariantStockAdmin = asyncHandler(async (req, res) => {
+  const result = await ProductService.adjustVariantStockAdmin({
+    ...req.body,
+    adminId: req.user?._id
+  });
+  new ApiResponse(HTTP_CODES.OK, result, "Stock adjusted successfully.").send(res);
+});
+
+/**
+ * Admin: Bulk toggle product active status
+ * PATCH /api/v1/admin/products/bulk-status
+ */
+const bulkToggleStatusAdmin = asyncHandler(async (req, res) => {
+  const result = await ProductService.bulkToggleStatusAdmin({
+    ...req.body,
+    adminId: req.user?._id
+  });
+  new ApiResponse(HTTP_CODES.OK, result, "Bulk status updated successfully.").send(res);
+});
+
+/**
+ * Admin: Export catalog products to RFC 4180 CSV
+ * GET /api/v1/admin/products/export/csv
+ */
+const exportProductsCsvAdmin = asyncHandler(async (req, res) => {
+  const csvData = await ProductService.exportProductsCsvAdmin();
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", "attachment; filename=catalog-products.csv");
+  return res.status(HTTP_CODES.OK).send(csvData);
+});
+
 module.exports = {
   getPublicProducts,
   getPublicProductBySlug,
@@ -118,6 +153,9 @@ module.exports = {
   getAdminProducts,
   getAdminProductById,
   getInventoryAdmin,
+  adjustVariantStockAdmin,
+  bulkToggleStatusAdmin,
+  exportProductsCsvAdmin,
   createProduct,
   updateProduct,
   toggleProductStatus,
