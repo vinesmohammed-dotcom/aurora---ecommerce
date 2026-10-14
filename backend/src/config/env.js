@@ -39,7 +39,9 @@ const env = Object.freeze({
   AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID || "",
   AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY || "",
   AWS_S3_BUCKET: process.env.AWS_S3_BUCKET || "aurora-media-assets",
-  AWS_SES_FROM_EMAIL: process.env.AWS_SES_FROM_EMAIL || "noreply@aurora-store.example.com"
+  AWS_SES_FROM_EMAIL: process.env.AWS_SES_FROM_EMAIL || "noreply@aurora-store.example.com",
+  // Google OAuth Client Configuration
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || ""
 });
 
 module.exports = env;

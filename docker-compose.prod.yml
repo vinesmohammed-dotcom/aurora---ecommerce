@@ -40,6 +40,7 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-aurora-media-assets}
       - AWS_SES_FROM_EMAIL=${AWS_SES_FROM_EMAIL:-noreply@aurora-store.example.com}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/v1/health/live"]
       interval: 15s
@@ -66,6 +67,7 @@ services:
       dockerfile: Dockerfile
       args:
         - VITE_API_URL=/api/v1
+        - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
     container_name: aurora-frontend-prod
     restart: unless-stopped
     ports:

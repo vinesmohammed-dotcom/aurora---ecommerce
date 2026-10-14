@@ -22,7 +22,9 @@ COPY . .
 
 # Build Vite single-page application
 ARG VITE_API_URL="http://localhost:5000/api/v1"
+ARG VITE_GOOGLE_CLIENT_ID=""
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 
 RUN npm run build
 
