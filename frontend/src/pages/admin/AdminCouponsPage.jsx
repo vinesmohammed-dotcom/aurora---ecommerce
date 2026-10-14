@@ -4,6 +4,7 @@ import api from "../../services/api";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 import Card from "../../components/ui/Card";
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 export default function AdminCouponsPage() {
   const [coupons, setCoupons] = useState([]);
@@ -11,6 +12,7 @@ export default function AdminCouponsPage() {
   const [error, setError] = useState(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  useScrollLock(isModalOpen);
   const [formData, setFormData] = useState({
     code: "",
     description: "",
@@ -196,8 +198,8 @@ export default function AdminCouponsPage() {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full my-auto p-6 space-y-4">
             <div className="flex items-center justify-between border-b pb-3 border-slate-200">
               <h3 className="text-lg font-bold font-heading text-slate-900">New Coupon Code</h3>
               <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 text-lg font-bold">

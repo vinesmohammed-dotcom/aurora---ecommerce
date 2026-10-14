@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import StarRating from "./StarRating";
 import { X, AlertCircle, Loader2 } from "lucide-react";
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 /**
  * ReviewFormModal component
@@ -15,6 +16,7 @@ export default function ReviewFormModal({
   productName = "Product"
 }) {
   const isEditing = !!initialData?._id;
+  useScrollLock(isOpen);
 
   const [rating, setRating] = useState(5);
   const [title, setTitle] = useState("");
@@ -97,9 +99,9 @@ export default function ReviewFormModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-fade-in overflow-y-auto">
       <div
-        className="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-slate-100 overflow-hidden transform transition-all"
+        className="w-full max-w-lg my-auto rounded-2xl bg-white shadow-2xl border border-slate-100 overflow-hidden transform transition-all max-h-[90vh] flex flex-col"
         role="dialog"
         aria-modal="true"
         aria-labelledby="review-modal-title"
@@ -126,7 +128,7 @@ export default function ReviewFormModal({
         </div>
 
         {/* Modal Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
           {submitError && (
             <div className="flex items-start gap-2.5 rounded-xl bg-rose-50 border border-rose-200 p-3.5 text-xs text-rose-700">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />

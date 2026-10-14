@@ -5,6 +5,8 @@ import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 import Card from "../../components/ui/Card";
 import PriceDisplay from "../../components/catalog/PriceDisplay";
+import { useScrollLock } from "../../hooks/useScrollLock";
+import { Download, CheckSquare, Square } from "lucide-react";
 
 export default function AdminProductsPage() {
   const [products, setProducts] = useState([]);
@@ -19,6 +21,11 @@ export default function AdminProductsPage() {
   const [brandFilter, setBrandFilter] = useState("");
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1, limit: 10 });
+
+  // CSV Export & Bulk Operations State
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [selectedProductIds, setSelectedProductIds] = useState([]);
+  const [isBulkOperating, setIsBulkOperating] = useState(false);
 
   // Create/Edit Product Modal
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -42,6 +49,7 @@ export default function AdminProductsPage() {
   // Variant Management Modal
   const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
   const [activeProductForVariants, setActiveProductForVariants] = useState(null);
+  useScrollLock(isProductModalOpen || isVariantModalOpen);
   const [variantForm, setVariantForm] = useState({
     sku: "",
     title: "",
@@ -229,6 +237,61 @@ export default function AdminProductsPage() {
     }
   };
 
+  const handleDownloadCsv = async () => {
+    try {
+      setExportingCsv(true);
+      const csvData = await api.get("/admin/products/export/csv", { responseType: "blob" });
+      const blob = new Blob([csvData], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `aurora-catalog-products-${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (err) {
+      alert("Failed to export catalog CSV: " + (err.message || "Unknown error"));
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
+  const toggleSelectProduct = (id) => {
+    setSelectedProductIds((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedProductIds.length === products.length) {
+      setSelectedProductIds([]);
+    } else {
+      setSelectedProductIds(products.map((p) => p._id));
+    }
+  };
+
+  const handleBulkStatus = async (isActive) => {
+    if (selectedProductIds.length === 0) return;
+    const actionWord = isActive ? "activate" : "deactivate";
+    if (!window.confirm(`Are you sure you want to ${actionWord} ${selectedProductIds.length} selected products?`)) return;
+
+    try {
+      setIsBulkOperating(true);
+      const res = await api.patch("/admin/products/bulk-status", {
+        productIds: selectedProductIds,
+        isActive
+      });
+      if (res.success) {
+        setSelectedProductIds([]);
+        fetchProducts();
+      }
+    } catch (err) {
+      alert("Failed bulk update: " + (err.message || "Unknown error"));
+    } finally {
+      setIsBulkOperating(false);
+    }
+  };
+
   // Variant Modal Handlers
   const openVariantManager = (product) => {
     setActiveProductForVariants(product);
@@ -358,6 +421,17 @@ export default function AdminProductsPage() {
           <Link to="/admin">
             <Button variant="secondary" size="sm">Back to Dashboard</Button>
           </Link>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleDownloadCsv}
+            disabled={exportingCsv || loading}
+            className="flex items-center gap-1.5"
+            id="export-catalog-csv"
+          >
+            <Download className="h-4 w-4 text-slate-500" />
+            <span>{exportingCsv ? "Exporting..." : "Export CSV"}</span>
+          </Button>
           <Button variant="primary" size="sm" onClick={openCreateProductModal}>
             + Create Product
           </Button>
@@ -430,27 +504,85 @@ export default function AdminProductsPage() {
             </Button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-600">
-              <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-500 border-b border-slate-200">
-                <tr>
-                  <th className="px-6 py-3.5">Product</th>
-                  <th className="px-6 py-3.5">Category / Brand</th>
-                  <th className="px-6 py-3.5">Base Price</th>
-                  <th className="px-6 py-3.5">Variants & Stock</th>
-                  <th className="px-6 py-3.5 text-center">Status</th>
-                  <th className="px-6 py-3.5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {products.map((p) => {
-                  const totalStock = p.variants?.reduce((sum, v) => sum + (v.stock || 0), 0) || 0;
-                  const activeVariantsCount = p.variants?.filter((v) => v.isActive).length || 0;
-                  const mainImage = p.images?.[0] || "https://placehold.co/100x100?text=No+Img";
+          <div>
+            {/* Bulk Actions Floating Bar */}
+            {selectedProductIds.length > 0 && (
+              <div className="bg-indigo-50 border-b border-indigo-100 px-6 py-2.5 flex items-center justify-between text-xs font-semibold text-indigo-900 animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <span className="bg-indigo-600 text-white rounded-full px-2 py-0.5 text-[11px] font-bold">
+                    {selectedProductIds.length}
+                  </span>
+                  <span>Products selected</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleBulkStatus(true)}
+                    disabled={isBulkOperating}
+                    className="bg-white text-emerald-700 hover:bg-emerald-50 border-emerald-200"
+                  >
+                    Bulk Activate
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleBulkStatus(false)}
+                    disabled={isBulkOperating}
+                    className="bg-white text-rose-700 hover:bg-rose-50 border-rose-200"
+                  >
+                    Bulk Deactivate
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProductIds([])}
+                    className="text-slate-500 hover:text-slate-800 underline text-xs ml-2 cursor-pointer"
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              </div>
+            )}
 
-                  return (
-                    <tr key={p._id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="px-6 py-4">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-500 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3.5 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={products.length > 0 && selectedProductIds.length === products.length}
+                        onChange={toggleSelectAll}
+                        className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                        title="Select All"
+                      />
+                    </th>
+                    <th className="px-6 py-3.5">Product</th>
+                    <th className="px-6 py-3.5">Category / Brand</th>
+                    <th className="px-6 py-3.5">Base Price</th>
+                    <th className="px-6 py-3.5">Variants & Stock</th>
+                    <th className="px-6 py-3.5 text-center">Status</th>
+                    <th className="px-6 py-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {products.map((p) => {
+                    const totalStock = p.variants?.reduce((sum, v) => sum + (v.stock || 0), 0) || 0;
+                    const activeVariantsCount = p.variants?.filter((v) => v.isActive).length || 0;
+                    const mainImage = p.images?.[0] || "https://placehold.co/100x100?text=No+Img";
+                    const isSelected = selectedProductIds.includes(p._id);
+
+                    return (
+                      <tr key={p._id} className={`hover:bg-slate-50/70 transition-colors ${isSelected ? "bg-indigo-50/30" : ""}`}>
+                        <td className="px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectProduct(p._id)}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                          />
+                        </td>
+                        <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <img
                             src={mainImage}
@@ -523,6 +655,7 @@ export default function AdminProductsPage() {
               </tbody>
             </table>
           </div>
+        </div>
         )}
 
         {/* Pagination Footer */}

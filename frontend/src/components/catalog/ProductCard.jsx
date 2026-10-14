@@ -10,8 +10,11 @@ export default function ProductCard({ product }) {
   const { name, slug, brand, category, images, basePrice, variants } = product;
   const mainImage = images && images.length > 0 ? images[0] : null;
 
-  // Check if any active variant has stock
-  const hasStock = variants && variants.some((v) => v.isActive && v.stock > 0);
+  // Calculate total active variant stock
+  const activeVariants = variants ? variants.filter((v) => v.isActive) : [];
+  const totalStock = activeVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+  const hasStock = totalStock > 0;
+  const isLowStock = hasStock && totalStock <= 5;
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-md">
@@ -32,13 +35,17 @@ export default function ProductCard({ product }) {
 
         {/* Stock Status Badge */}
         <div className="absolute top-3 right-3">
-          {hasStock ? (
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200/60 shadow-xs">
-              In Stock
-            </span>
-          ) : (
+          {!hasStock ? (
             <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 border border-rose-200/60 shadow-xs">
               Out of Stock
+            </span>
+          ) : isLowStock ? (
+            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 border border-amber-200/60 shadow-xs">
+              Only {totalStock} Left!
+            </span>
+          ) : (
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200/60 shadow-xs">
+              In Stock
             </span>
           )}
         </div>

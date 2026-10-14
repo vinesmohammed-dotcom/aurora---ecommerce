@@ -6,10 +6,14 @@ import ProductSearch from "../components/catalog/ProductSearch";
 import ProductSort from "../components/catalog/ProductSort";
 import ProductGrid from "../components/catalog/ProductGrid";
 import Pagination from "../components/catalog/Pagination";
-import { SlidersHorizontal, X } from "lucide-react";
+import RecentlyViewedProducts from "../components/catalog/RecentlyViewedProducts";
+import { SlidersHorizontal, X, RotateCcw } from "lucide-react";
+import { useScrollLock } from "../hooks/useScrollLock";
+import { useRecentlyViewed } from "../hooks/useRecentlyViewed";
 
 export default function ShopPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { recentlyViewed, clearRecentlyViewed } = useRecentlyViewed();
 
   // URL state extractions
   const page = parseInt(searchParams.get("page") || "1", 10);
@@ -30,6 +34,14 @@ export default function ShopPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+  useScrollLock(mobileFilterOpen);
+
+  // Active filter helper derivations
+  const hasActiveFilters = Boolean(search || category || brand || minPrice || maxPrice || inStock);
+  const activeCategoryObj = categories.find((c) => c._id === category || c.slug === category);
+  const activeCategoryName = activeCategoryObj ? activeCategoryObj.name : category;
+  const activeBrandObj = brands.find((b) => b._id === brand || b.slug === brand);
+  const activeBrandName = activeBrandObj ? activeBrandObj.name : brand;
 
   // Fetch Categories & Brands once on mount
   useEffect(() => {
@@ -156,6 +168,92 @@ export default function ShopPage() {
             <ProductSort currentSort={sort} onSortChange={(newSort) => updateQuery({ sort: newSort })} />
           </div>
 
+          {/* Active Filter Chips & Clear All */}
+          {hasActiveFilters && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-100/70 p-3 border border-slate-200">
+              <span className="text-xs font-semibold text-slate-500 mr-1">Active Filters:</span>
+
+              {search && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-300 px-3 py-1 text-xs text-slate-800 shadow-2xs">
+                  <span>Search: "{search}"</span>
+                  <button
+                    type="button"
+                    onClick={() => updateQuery({ search: "" })}
+                    className="rounded-full p-0.5 hover:bg-slate-200 text-slate-400 hover:text-slate-800"
+                    title="Remove search"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )}
+
+              {category && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 border border-indigo-200 px-3 py-1 text-xs font-medium text-indigo-800 shadow-2xs">
+                  <span>Category: {activeCategoryName}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateQuery({ category: "" })}
+                    className="rounded-full p-0.5 hover:bg-indigo-100 text-indigo-500 hover:text-indigo-800"
+                    title="Remove category filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )}
+
+              {brand && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 border border-indigo-200 px-3 py-1 text-xs font-medium text-indigo-800 shadow-2xs">
+                  <span>Brand: {activeBrandName}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateQuery({ brand: "" })}
+                    className="rounded-full p-0.5 hover:bg-indigo-100 text-indigo-500 hover:text-indigo-800"
+                    title="Remove brand filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )}
+
+              {(minPrice || maxPrice) && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-300 px-3 py-1 text-xs text-slate-800 shadow-2xs">
+                  <span>Price: ₹{minPrice || 0} – ₹{maxPrice || "Max"}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateQuery({ minPrice: "", maxPrice: "" })}
+                    className="rounded-full p-0.5 hover:bg-slate-200 text-slate-400 hover:text-slate-800"
+                    title="Remove price filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )}
+
+              {inStock && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-medium text-emerald-800 shadow-2xs">
+                  <span>In Stock Only</span>
+                  <button
+                    type="button"
+                    onClick={() => updateQuery({ inStock: "" })}
+                    className="rounded-full p-0.5 hover:bg-emerald-100 text-emerald-500 hover:text-emerald-800"
+                    title="Remove in-stock filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Clear All</span>
+              </button>
+            </div>
+          )}
+
           {/* Products Grid */}
           <ProductGrid
             products={products}
@@ -174,6 +272,9 @@ export default function ShopPage() {
           )}
         </div>
       </div>
+
+      {/* Persistent Recently Viewed Shelf */}
+      <RecentlyViewedProducts items={recentlyViewed} onClear={clearRecentlyViewed} />
 
       {/* Mobile Filters Drawer */}
       {mobileFilterOpen && (

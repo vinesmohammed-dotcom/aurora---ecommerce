@@ -7,6 +7,8 @@ import VariantSelector from "../components/catalog/VariantSelector";
 import ProductCard from "../components/catalog/ProductCard";
 import StarRating from "../features/reviews/StarRating";
 import ProductReviewsSection from "../features/reviews/ProductReviewsSection";
+import RecentlyViewedProducts from "../components/catalog/RecentlyViewedProducts";
+import { useRecentlyViewed } from "../hooks/useRecentlyViewed";
 import {
   Package,
   ShoppingBag,
@@ -19,12 +21,15 @@ import {
   ZoomOut,
   X,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Info
 } from "lucide-react";
+import { useScrollLock } from "../hooks/useScrollLock";
 
 export default function ProductDetailPage() {
   const { slug } = useParams();
   const dispatch = useDispatch();
+  const { recentlyViewed, addRecentlyViewed, clearRecentlyViewed } = useRecentlyViewed();
   const [product, setProduct] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [activeImage, setActiveImage] = useState(null);
@@ -41,6 +46,8 @@ export default function ProductDetailPage() {
   const [isMagnified, setIsMagnified] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
+  useScrollLock(isLightboxOpen);
+
   useEffect(() => {
     const fetchProductDetail = async () => {
       setIsLoading(true);
@@ -49,6 +56,9 @@ export default function ProductDetailPage() {
         const res = await api.get(`/products/${slug}`);
         const prod = res.data;
         setProduct(prod);
+        if (prod) {
+          addRecentlyViewed(prod);
+        }
         if (prod?.variants && prod.variants.length > 0) {
           // Select first active variant with stock, or just first active
           const firstInStock = prod.variants.find((v) => v.stock > 0) || prod.variants[0];
@@ -375,26 +385,91 @@ export default function ProductDetailPage() {
             )}
           </div>
 
-          {/* Trust Badges */}
+          {/* Trust Badges with Policy Links */}
           <div className="grid grid-cols-3 gap-4 border-t border-b border-slate-100 py-6 text-center">
             <div className="flex flex-col items-center gap-1.5 text-xs text-slate-600">
               <ShieldCheck className="h-5 w-5 text-emerald-600" />
               <span className="font-semibold">100% Authentic</span>
+              <span className="text-[11px] text-slate-400">Direct from brand</span>
             </div>
-            <div className="flex flex-col items-center gap-1.5 text-xs text-slate-600">
-              <Truck className="h-5 w-5 text-indigo-600" />
+            <Link
+              to="/shipping-policy"
+              className="flex flex-col items-center gap-1.5 text-xs text-slate-600 hover:text-indigo-600 transition group"
+            >
+              <Truck className="h-5 w-5 text-indigo-600 group-hover:scale-110 transition-transform" />
               <span className="font-semibold">Free Express Delivery</span>
-            </div>
-            <div className="flex flex-col items-center gap-1.5 text-xs text-slate-600">
-              <RotateCcw className="h-5 w-5 text-amber-600" />
+              <span className="text-[11px] text-indigo-500 underline">View policy</span>
+            </Link>
+            <Link
+              to="/refund-policy"
+              className="flex flex-col items-center gap-1.5 text-xs text-slate-600 hover:text-amber-600 transition group"
+            >
+              <RotateCcw className="h-5 w-5 text-amber-600 group-hover:scale-110 transition-transform" />
               <span className="font-semibold">7-Day Easy Returns</span>
-            </div>
+              <span className="text-[11px] text-amber-600 underline">Check terms</span>
+            </Link>
           </div>
 
           {/* Description */}
           <div>
             <h3 className="text-sm font-bold uppercase tracking-wider text-slate-900 mb-2">Description</h3>
             <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line">{description}</p>
+          </div>
+
+          {/* Complete Product Specifications */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-5 space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <Info className="h-4 w-4 text-indigo-600" />
+              <span>Product Specifications</span>
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+              <div className="bg-white p-2.5 rounded-lg border border-slate-100">
+                <span className="text-slate-400 block">Brand</span>
+                <span className="font-semibold text-slate-800">{brand?.name || "Generic"}</span>
+              </div>
+              <div className="bg-white p-2.5 rounded-lg border border-slate-100">
+                <span className="text-slate-400 block">Category</span>
+                <span className="font-semibold text-slate-800">{category?.name || "Apparel"}</span>
+              </div>
+              {selectedVariant?.sku && (
+                <div className="bg-white p-2.5 rounded-lg border border-slate-100">
+                  <span className="text-slate-400 block">SKU Code</span>
+                  <span className="font-mono font-semibold text-slate-800">{selectedVariant.sku}</span>
+                </div>
+              )}
+              {selectedVariant?.attributes &&
+                Object.entries(selectedVariant.attributes).map(([key, val]) => (
+                  <div key={key} className="bg-white p-2.5 rounded-lg border border-slate-100">
+                    <span className="text-slate-400 block capitalize">{key}</span>
+                    <span className="font-semibold text-slate-800">{String(val)}</span>
+                  </div>
+                ))}
+              <div className="bg-white p-2.5 rounded-lg border border-slate-100">
+                <span className="text-slate-400 block">Availability</span>
+                <span
+                  className={`font-semibold ${
+                    selectedVariant?.stock > 0 ? "text-emerald-700" : "text-rose-600"
+                  }`}
+                >
+                  {selectedVariant?.stock > 0
+                    ? `${selectedVariant.stock} units in stock`
+                    : "Currently Out of Stock"}
+                </span>
+              </div>
+            </div>
+            {product?.tags && product.tags.length > 0 && (
+              <div className="pt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-slate-400">Tags:</span>
+                {product.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full bg-slate-200/80 px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -429,10 +504,17 @@ export default function ProductDetailPage() {
       {/* Customer Product Ratings & Reviews Section */}
       <ProductReviewsSection product={product} />
 
+      {/* Recently Viewed Shelf */}
+      <RecentlyViewedProducts
+        items={recentlyViewed}
+        currentProductId={product?._id}
+        onClear={clearRecentlyViewed}
+      />
+
       {/* Full-Screen Accessible Image Lightbox Modal */}
       {isLightboxOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-md animate-fade-in overflow-y-auto"
           role="dialog"
           aria-modal="true"
           aria-label="Image Zoom Lightbox"

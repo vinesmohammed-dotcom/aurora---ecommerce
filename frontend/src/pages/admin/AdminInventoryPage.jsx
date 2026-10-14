@@ -4,6 +4,8 @@ import Card from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
 import api from "../../services/api";
+import { useScrollLock } from "../../hooks/useScrollLock";
+import { Sliders, CheckCircle2, AlertTriangle, X } from "lucide-react";
 
 export default function AdminInventoryPage() {
   const [items, setItems] = useState([]);
@@ -14,6 +16,17 @@ export default function AdminInventoryPage() {
   // Filters
   const [search, setSearch] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
+
+  // Stock Adjustment Modal State
+  const [adjustingItem, setAdjustingItem] = useState(null);
+  const [adjustType, setAdjustType] = useState("SET_ABSOLUTE");
+  const [adjustQty, setAdjustQty] = useState(0);
+  const [adjustReason, setAdjustReason] = useState("RESTOCK");
+  const [adjustNotes, setAdjustNotes] = useState("");
+  const [isSubmittingAdjust, setIsSubmittingAdjust] = useState(false);
+  const [adjustModalError, setAdjustModalError] = useState("");
+  const [adjustSuccessToast, setAdjustSuccessToast] = useState("");
+  useScrollLock(!!adjustingItem);
 
   const fetchInventory = async (page = 1) => {
     try {
@@ -54,10 +67,78 @@ export default function AdminInventoryPage() {
       maximumFractionDigits: 2
     }).format((paise || 0) / 100);
 
-  const lowStockCount = items.filter((i) => i.isLowStock).length;
+  const handleOpenAdjustModal = (item) => {
+    setAdjustingItem(item);
+    setAdjustType("SET_ABSOLUTE");
+    setAdjustQty(item.stock);
+    setAdjustReason("RESTOCK");
+    setAdjustNotes("");
+    setAdjustModalError("");
+  };
+
+  const handleConfirmAdjustment = async (e) => {
+    e.preventDefault();
+    if (!adjustingItem) return;
+
+    const parsedQty = parseInt(adjustQty, 10);
+    if (isNaN(parsedQty) || parsedQty < 0) {
+      setAdjustModalError("Quantity must be a valid non-negative integer.");
+      return;
+    }
+
+    if (adjustType === "DECREMENT" && adjustingItem.stock - parsedQty < 0) {
+      setAdjustModalError(`Cannot reduce stock by ${parsedQty} units. Maximum decremental buffer is ${adjustingItem.stock}.`);
+      return;
+    }
+
+    try {
+      setIsSubmittingAdjust(true);
+      setAdjustModalError("");
+
+      const res = await api.patch("/admin/products/inventory/adjust", {
+        productId: adjustingItem.productId,
+        variantId: adjustingItem.variantId,
+        sku: adjustingItem.sku,
+        adjustmentType: adjustType,
+        quantity: parsedQty,
+        reason: adjustReason,
+        notes: adjustNotes
+      });
+
+      if (res.success) {
+        setAdjustSuccessToast(`Stock for SKU ${adjustingItem.sku} successfully updated to ${res.data?.newStock} units.`);
+        setAdjustingItem(null);
+        fetchInventory(pagination.page);
+        setTimeout(() => setAdjustSuccessToast(""), 4500);
+      } else {
+        setAdjustModalError(res.message || "Failed to adjust inventory stock.");
+      }
+    } catch (err) {
+      setAdjustModalError(err.message || "Failed to adjust inventory stock.");
+    } finally {
+      setIsSubmittingAdjust(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
+      {/* Success Alert */}
+      {adjustSuccessToast && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            <span>{adjustSuccessToast}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAdjustSuccessToast("")}
+            className="text-emerald-600 hover:text-emerald-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -169,6 +250,7 @@ export default function AdminInventoryPage() {
                   <th className="py-3 px-6 text-right">Selling Price</th>
                   <th className="py-3 px-6 text-center">Stock Level</th>
                   <th className="py-3 px-6 text-right">Catalog Status</th>
+                  <th className="py-3 px-6 text-right">Stock Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -220,6 +302,17 @@ export default function AdminInventoryPage() {
                         {item.isActive ? "Active" : "Archived"}
                       </Badge>
                     </td>
+                    <td className="py-3 px-6 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAdjustModal(item)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-indigo-500 hover:text-indigo-600 transition shadow-2xs cursor-pointer"
+                        id={`adjust-stock-${item.sku}`}
+                      >
+                        <Sliders className="h-3 w-3" />
+                        <span>Adjust</span>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -254,6 +347,130 @@ export default function AdminInventoryPage() {
           </div>
         )}
       </Card>
+
+      {/* Authorized Variant Stock Adjustment Modal */}
+      {adjustingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="w-full max-w-md my-auto rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200">
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold font-heading">
+                  Adjust Inventory Stock
+                </h3>
+                <p className="font-mono text-xs text-indigo-300">{adjustingItem.sku}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdjustingItem(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmAdjustment} className="p-6 space-y-4 text-xs">
+              {adjustModalError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700 font-semibold flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-rose-500 mt-0.5" />
+                  <span>{adjustModalError}</span>
+                </div>
+              )}
+
+              <div className="rounded-xl bg-slate-50 p-3 border border-slate-200/80 space-y-1 text-slate-600">
+                <p className="font-semibold text-slate-900 text-sm">{adjustingItem.productTitle}</p>
+                <div className="flex justify-between pt-1">
+                  <span>Current Warehouse Stock:</span>
+                  <span className="font-mono font-bold text-slate-900">{adjustingItem.stock} units</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Adjustment Operation Mode
+                </label>
+                <select
+                  value={adjustType}
+                  onChange={(e) => setAdjustType(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 p-2.5 text-xs bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                >
+                  <option value="SET_ABSOLUTE">Set Exact Total Stock</option>
+                  <option value="INCREMENT">Increment Stock (Restock Inbound)</option>
+                  <option value="DECREMENT">Decrement Stock (Damaged / Removal)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {adjustType === "SET_ABSOLUTE"
+                    ? "New Total Stock Count"
+                    : adjustType === "INCREMENT"
+                    ? "Units to Add"
+                    : "Units to Deduct"}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={adjustQty}
+                  onChange={(e) => setAdjustQty(e.target.value)}
+                  required
+                  className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Authorized Audit Reason <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={adjustReason}
+                  onChange={(e) => setAdjustReason(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 p-2.5 text-xs bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                >
+                  <option value="RESTOCK">Supplier Restock Inbound</option>
+                  <option value="DAMAGED_DISPOSAL">Damaged / Expired Inventory Disposal</option>
+                  <option value="INVENTORY_CORRECTION">Cycle Count Discrepancy Correction</option>
+                  <option value="RETURN_RESTOCK">Customer Return Inspection Restock</option>
+                  <option value="OTHER">Other Operational Reason</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Audit Notes (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={adjustNotes}
+                  onChange={(e) => setAdjustNotes(e.target.value)}
+                  placeholder="e.g. Received shipment PO-8492 from regional hub..."
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setAdjustingItem(null)}
+                  disabled={isSubmittingAdjust}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  disabled={isSubmittingAdjust}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                >
+                  {isSubmittingAdjust ? "Saving Audit..." : "Record Adjustment"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import api from "../../services/api";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 import Card from "../../components/ui/Card";
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 const ALLOWED_TRANSITIONS = {
   PENDING: ["CONFIRMED", "CANCELLED"],
@@ -46,6 +47,7 @@ export default function AdminOrdersPage() {
   const [newStatus, setNewStatus] = useState("");
   const [statusNote, setStatusNote] = useState("");
   const [submittingStatus, setSubmittingStatus] = useState(false);
+  useScrollLock(!!updatingOrderId || !!selectedOrder);
 
   const formatCurrency = (val) =>
     new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(val || 0);
@@ -277,8 +279,8 @@ export default function AdminOrdersPage() {
 
       {/* Advance Status Modal */}
       {updatingOrderId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full my-auto p-6 space-y-4">
             <h3 className="text-lg font-bold font-heading text-slate-900">Update Order State</h3>
             <p className="text-xs text-slate-500">
               Select the next valid lifecycle state in the order state machine.
@@ -332,8 +334,8 @@ export default function AdminOrdersPage() {
 
       {/* Snapshot Details Modal */}
       {selectedOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 max-h-[85vh] overflow-y-auto space-y-4 text-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full my-auto p-6 max-h-[85vh] overflow-y-auto space-y-4 text-xs">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="text-base font-bold text-slate-900 font-heading">
                 Order Snapshot: #{selectedOrder.orderNumber}

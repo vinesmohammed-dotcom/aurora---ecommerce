@@ -4,6 +4,7 @@ import Card from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
 import api from "../../services/api";
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 export default function AdminUsersPage() {
   const { user: currentAdmin } = useSelector((state) => state.auth);
@@ -22,6 +23,7 @@ export default function AdminUsersPage() {
   const [blockReason, setBlockReason] = useState("");
   const [submittingAction, setSubmittingAction] = useState(false);
   const [actionError, setActionError] = useState("");
+  useScrollLock(!!selectedUser);
 
   const fetchUsers = async (page = 1) => {
     try {
@@ -299,8 +301,8 @@ export default function AdminUsersPage() {
 
       {/* Block / Unblock Modal */}
       {selectedUser && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <Card className="max-w-md w-full my-auto p-6 shadow-2xl animate-in fade-in zoom-in-95">
             <h3 className="text-lg font-bold font-heading text-slate-900 mb-2">
               {selectedUser.isBlocked ? "Reactivate User Account" : "Suspend User Account"}
             </h3>

@@ -3,6 +3,7 @@ import Card from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
 import api from "../../services/api";
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 export default function AdminRefundsPage() {
   const [refunds, setRefunds] = useState([]);
@@ -22,6 +23,7 @@ export default function AdminRefundsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
   const [modalSuccess, setModalSuccess] = useState("");
+  useScrollLock(showModal);
 
   const fetchRefunds = async (page = 1) => {
     try {
@@ -324,8 +326,8 @@ export default function AdminRefundsPage() {
 
       {/* Initiate Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full p-6 shadow-2xl">
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <Card className="max-w-md w-full my-auto p-6 shadow-2xl">
             <h3 className="text-lg font-bold font-heading text-slate-900 mb-1">
               Initiate Gateway Refund
             </h3>

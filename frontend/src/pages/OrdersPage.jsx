@@ -1,24 +1,37 @@
 import React, { useState, useEffect } from "react";
-import { useLocation, Link } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useDispatch } from "react-redux";
 import api from "../services/api";
 import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import { launchRazorpayModal } from "../utils/razorpay";
+import { useScrollLock } from "../hooks/useScrollLock";
+import { setCartItemCount } from "../store/slices/cartSlice";
+import OrderInvoiceModal from "../features/orders/OrderInvoiceModal";
+import { FileText, ShoppingBag, RotateCcw } from "lucide-react";
 
 export default function OrdersPage() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [cancellingOrderId, setCancellingOrderId] = useState(null);
-  const [cancelReason, setCancelReason] = useState("");
+  const [invoiceOrder, setInvoiceOrder] = useState(null);
+  const [cancellingOrder, setCancellingOrder] = useState(null);
+  const [cancelReasonCategory, setCancelReasonCategory] = useState("Found a better price elsewhere");
+  const [customCancelReason, setCustomCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState("");
+  const [cancelSuccess, setCancelSuccess] = useState(null);
   const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
   const [retryingOrderId, setRetryingOrderId] = useState(null);
   const [returningOrderId, setReturningOrderId] = useState(null);
   const [returnReason, setReturnReason] = useState("");
   const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
+  const [isReorderingId, setIsReorderingId] = useState(null);
+  useScrollLock(!!selectedOrder || !!cancellingOrder || !!returningOrderId || !!invoiceOrder);
 
   // Success alert from recent checkout navigation
   const [checkoutSuccess, setCheckoutSuccess] = useState(location.state?.justOrdered || false);
@@ -116,26 +129,71 @@ export default function OrdersPage() {
   }, [page]);
 
   const handleOpenCancelModal = (order) => {
-    setCancellingOrderId(order._id);
-    setCancelReason("Found a better price elsewhere");
+    setCancellingOrder(order);
+    setCancelReasonCategory("Found a better price elsewhere");
+    setCustomCancelReason("");
+    setCancelError("");
   };
 
   const handleConfirmCancel = async () => {
-    if (!cancellingOrderId) return;
+    if (!cancellingOrder) return;
     try {
       setIsSubmittingCancel(true);
-      const res = await api.post(`/orders/${cancellingOrderId}/cancel`, {
-        reason: cancelReason || "Customer cancelled order"
+      setCancelError("");
+      const effectiveReason =
+        cancelReasonCategory === "Other" && customCancelReason.trim()
+          ? customCancelReason.trim()
+          : cancelReasonCategory || "Customer cancelled order before dispatch";
+
+      const res = await api.post(`/orders/${cancellingOrder._id}/cancel`, {
+        reason: effectiveReason
       });
 
       if (res.success) {
-        setCancellingOrderId(null);
+        const orderNum = cancellingOrder.orderNumber;
+        setCancellingOrder(null);
+        setCancelSuccess(`Order #${orderNum} has been cancelled successfully. Reserved inventory has been restored.`);
+        if (selectedOrder && selectedOrder._id === cancellingOrder._id) {
+          setSelectedOrder(null);
+        }
         fetchOrders();
+      } else {
+        setCancelError(res.message || "Failed to cancel order.");
       }
     } catch (err) {
-      alert(err.message || "Failed to cancel order.");
+      setCancelError(err.message || "Failed to cancel order.");
     } finally {
       setIsSubmittingCancel(false);
+    }
+  };
+
+  const handleBuyAgain = async (order) => {
+    if (!order || !order.items || order.items.length === 0) return;
+    try {
+      setIsReorderingId(order._id);
+      let lastCart = null;
+      for (const item of order.items) {
+        const prodId = item.product?._id || item.product;
+        const variantId = item.variant?._id || item.variant;
+        if (prodId && variantId) {
+          const res = await api.post("/cart/items", {
+            productId: prodId,
+            variantId: variantId,
+            quantity: item.quantity || 1
+          });
+          if (res.success && res.data?.cart) {
+            lastCart = res.data.cart;
+          }
+        }
+      }
+      if (lastCart) {
+        dispatch(setCartItemCount(lastCart.totalItems || 0));
+      }
+      navigate("/cart");
+    } catch (err) {
+      alert(err.message || "Failed to reorder items. Some items may be currently out of stock.");
+    } finally {
+      setIsReorderingId(null);
     }
   };
 
@@ -242,6 +300,23 @@ export default function OrdersPage() {
         </div>
       )}
 
+      {cancelSuccess && (
+        <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-xs sm:text-sm text-emerald-800 font-medium flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2">
+            <span>✅</span>
+            <span>{cancelSuccess}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCancelSuccess(null)}
+            className="text-emerald-700 hover:text-emerald-900 font-bold ml-2 text-base leading-none"
+            aria-label="Dismiss cancellation alert"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl bg-rose-50 border border-rose-200 p-4 text-sm text-rose-700 font-medium">
           {error}
@@ -269,7 +344,7 @@ export default function OrdersPage() {
       ) : (
         <div className="space-y-6">
           {orders.map((order) => {
-            const canCancel = ["CONFIRMED", "PROCESSING"].includes(order.orderStatus);
+            const canCancel = ["PENDING", "CONFIRMED", "PROCESSING"].includes(order.orderStatus);
 
             return (
               <Card key={order._id} className="overflow-hidden border border-slate-200">
@@ -389,7 +464,33 @@ export default function OrdersPage() {
                       <Button
                         variant="secondary"
                         size="sm"
+                        onClick={() => setInvoiceOrder(order)}
+                        id={`invoice-btn-${order._id}`}
+                        title="Download Tax Invoice / Receipt"
+                        className="text-slate-700 hover:text-indigo-600 border-slate-200"
+                      >
+                        <FileText className="h-3.5 w-3.5 mr-1 text-slate-500" />
+                        <span>Invoice</span>
+                      </Button>
+
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleBuyAgain(order)}
+                        id={`reorder-btn-${order._id}`}
+                        disabled={isReorderingId === order._id}
+                        title="Reorder items from this purchase"
+                        className="text-slate-700 hover:text-emerald-700 border-slate-200"
+                      >
+                        <ShoppingBag className="h-3.5 w-3.5 mr-1 text-slate-500" />
+                        <span>{isReorderingId === order._id ? "Adding..." : "Buy Again"}</span>
+                      </Button>
+
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() => setSelectedOrder(order)}
+                        id={`view-details-${order._id}`}
                       >
                         View Timeline & Details
                       </Button>
@@ -399,8 +500,10 @@ export default function OrdersPage() {
                           variant="danger"
                           size="sm"
                           onClick={() => handleOpenCancelModal(order)}
+                          id={`cancel-order-${order._id}`}
+                          className="font-medium text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 hover:border-rose-600 bg-rose-50/50"
                         >
-                          Cancel Order
+                          ✕ Cancel Order
                         </Button>
                       )}
                     </div>
@@ -444,8 +547,8 @@ export default function OrdersPage() {
 
       {/* Order Details & Timeline Modal */}
       {selectedOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-2xl my-auto rounded-2xl bg-white shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold text-slate-900 font-heading">
@@ -530,44 +633,124 @@ export default function OrdersPage() {
               </div>
             </div>
 
-            <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 text-right">
-              <Button variant="secondary" size="sm" onClick={() => setSelectedOrder(null)}>
-                Close
-              </Button>
+            <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <div>
+                {["PENDING", "CONFIRMED", "PROCESSING"].includes(selectedOrder.orderStatus) && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => {
+                      const orderToCancel = selectedOrder;
+                      setSelectedOrder(null);
+                      handleOpenCancelModal(orderToCancel);
+                    }}
+                    id={`modal-cancel-order-${selectedOrder._id}`}
+                    className="font-medium text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 hover:border-rose-600 bg-rose-50/50"
+                  >
+                    ✕ Cancel Order
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setInvoiceOrder(selectedOrder)}
+                  className="text-slate-700 hover:text-indigo-600"
+                >
+                  <FileText className="h-4 w-4 mr-1 text-slate-500" />
+                  <span>Invoice</span>
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const ord = selectedOrder;
+                    setSelectedOrder(null);
+                    handleBuyAgain(ord);
+                  }}
+                  disabled={isReorderingId === selectedOrder._id}
+                  className="text-slate-700 hover:text-emerald-700"
+                >
+                  <ShoppingBag className="h-4 w-4 mr-1 text-slate-500" />
+                  <span>Buy Again</span>
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setSelectedOrder(null)}>
+                  Close
+                </Button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
       {/* Cancellation Confirmation Modal */}
-      {cancellingOrderId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4">
-            <h3 className="text-lg font-bold text-slate-900 font-heading">Cancel Order</h3>
-            <p className="text-xs text-slate-500">
-              Are you sure you want to cancel this order? Inventory will be restored immediately.
+      {cancellingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-md my-auto rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900 font-heading">
+                Cancel Order #{cancellingOrder.orderNumber}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCancellingOrder(null)}
+                className="text-slate-400 hover:text-slate-700 font-bold text-lg"
+                aria-label="Close modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Are you sure you want to cancel this order? Any reserved inventory will be restored immediately.
+              {cancellingOrder.paymentMethod === "ONLINE_RAZORPAY" && cancellingOrder.paymentStatus === "COMPLETED" && (
+                <span className="block mt-1.5 font-semibold text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded-lg">
+                  ⚡ Online Payment Notice: Your order was prepaid via Razorpay. Cancelling will flag this order for administrative gateway refund settlement.
+                </span>
+              )}
             </p>
+
+            {cancelError && (
+              <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-xs text-rose-700 font-medium">
+                {cancelError}
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Cancellation Reason</label>
               <select
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
+                value={cancelReasonCategory}
+                onChange={(e) => setCancelReasonCategory(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="Found a better price elsewhere">Found a better price elsewhere</option>
                 <option value="Ordered by mistake">Ordered by mistake</option>
                 <option value="Delivery time is too long">Delivery time is too long</option>
                 <option value="Need to change delivery address">Need to change delivery address</option>
-                <option value="Other">Other</option>
+                <option value="Other">Other (specify below)</option>
               </select>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            {cancelReasonCategory === "Other" && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Specific Reason</label>
+                <input
+                  type="text"
+                  maxLength={255}
+                  value={customCancelReason}
+                  onChange={(e) => setCustomCancelReason(e.target.value)}
+                  placeholder="Please tell us why you are cancelling..."
+                  className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => setCancellingOrderId(null)}
+                onClick={() => setCancellingOrder(null)}
                 disabled={isSubmittingCancel}
               >
                 Keep Order
@@ -577,6 +760,7 @@ export default function OrdersPage() {
                 size="sm"
                 onClick={handleConfirmCancel}
                 disabled={isSubmittingCancel}
+                id="confirm-cancel-order-button"
               >
                 {isSubmittingCancel ? "Cancelling..." : "Confirm Cancellation"}
               </Button>
@@ -587,8 +771,8 @@ export default function OrdersPage() {
 
       {/* Return Request Modal */}
       {returningOrderId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-md my-auto rounded-2xl bg-white p-6 shadow-2xl space-y-4">
             <h3 className="text-lg font-bold text-slate-900 font-heading">Request Return</h3>
             <p className="text-xs text-slate-500">
               Orders delivered within the last 7 days are eligible for return review. Please provide a reason for the return.
@@ -626,6 +810,14 @@ export default function OrdersPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Official Tax Invoice & Receipt Modal */}
+      {invoiceOrder && (
+        <OrderInvoiceModal
+          order={invoiceOrder}
+          onClose={() => setInvoiceOrder(null)}
+        />
       )}
     </div>
   );

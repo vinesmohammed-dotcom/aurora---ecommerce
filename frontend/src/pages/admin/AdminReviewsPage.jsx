@@ -4,6 +4,7 @@ import StarRating from "../../features/reviews/StarRating";
 import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
 import Card from "../../components/ui/Card";
+import { useScrollLock } from "../../hooks/useScrollLock";
 import {
   MessageSquare,
   ShieldCheck,
@@ -41,6 +42,7 @@ export default function AdminReviewsPage() {
   // Inspection Modal
   const [selectedReview, setSelectedReview] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  useScrollLock(!!selectedReview);
 
   const fetchAdminReviews = useCallback(async () => {
     setLoading(true);
@@ -409,8 +411,8 @@ export default function AdminReviewsPage() {
 
       {/* Review Inspection Modal */}
       {selectedReview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
+          <div className="w-full max-w-xl my-auto rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-slate-50">
               <h3 className="font-heading text-base font-bold text-slate-900">
                 Review Moderation Inspection
@@ -424,7 +426,7 @@ export default function AdminReviewsPage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4 text-xs">
+            <div className="p-6 space-y-4 text-xs overflow-y-auto flex-1">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <span className="text-slate-400 uppercase font-mono text-[10px] font-semibold block">

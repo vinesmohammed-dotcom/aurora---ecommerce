@@ -21,6 +21,14 @@ import PaymentSuccessPage from "../pages/PaymentSuccessPage";
 import PaymentFailurePage from "../pages/PaymentFailurePage";
 import NotFoundPage from "../pages/NotFoundPage";
 
+// Customer Help, Support & Trust Policy Pages
+import ContactPage from "../pages/ContactPage";
+import FaqPage from "../pages/FaqPage";
+import ShippingPolicyPage from "../pages/ShippingPolicyPage";
+import RefundPolicyPage from "../pages/RefundPolicyPage";
+import PrivacyPolicyPage from "../pages/PrivacyPolicyPage";
+import TermsPage from "../pages/TermsPage";
+
 // Lazy-Loaded Admin Management Pages (Code-Splitting Boundary)
 const AdminDashboardPage = React.lazy(() => import("../pages/admin/AdminDashboardPage"));
 const AdminReportsPage = React.lazy(() => import("../pages/admin/AdminReportsPage"));
@@ -64,6 +72,12 @@ export const router = createBrowserRouter([
       { path: "payment-success", element: <PaymentSuccessPage /> },
       { path: "payment-failure", element: <PaymentFailurePage /> },
       { path: "orders", element: <OrdersPage /> },
+      { path: "contact", element: <ContactPage /> },
+      { path: "faq", element: <FaqPage /> },
+      { path: "shipping-policy", element: <ShippingPolicyPage /> },
+      { path: "refund-policy", element: <RefundPolicyPage /> },
+      { path: "privacy", element: <PrivacyPolicyPage /> },
+      { path: "terms", element: <TermsPage /> },
       { path: "*", element: <NotFoundPage /> }
     ]
   },

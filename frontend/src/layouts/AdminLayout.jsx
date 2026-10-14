@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { useLogout } from "../features/auth/useLogout";
+import { useScrollLock } from "../hooks/useScrollLock";
 
 const NAVIGATION_SECTIONS = [
   {
@@ -55,6 +56,7 @@ export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user } = useSelector((state) => state.auth);
   const { handleLogout } = useLogout();
+  useScrollLock(sidebarOpen);
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans text-slate-800">
@@ -120,6 +122,16 @@ export default function AdminLayout() {
               Admin Ops
             </span>
           </Link>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
+            aria-label="Close Navigation"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
         {/* Navigation Items */}
@@ -185,7 +197,7 @@ export default function AdminLayout() {
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top Control Bar (Desktop) */}
         <header className="hidden md:flex h-16 bg-white border-b border-slate-200/80 px-8 items-center justify-between sticky top-0 z-20 shadow-sm">
           <div className="flex items-center space-x-3 text-sm">
