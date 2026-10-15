@@ -9,6 +9,7 @@ const StockService = require("../products/stock.service");
 const CheckoutService = require("../checkout/checkout.service");
 const CouponService = require("../coupons/coupon.service");
 const OrderService = require("../orders/order.service");
+const RazorpayService = require("../../services/razorpay.service");
 const { runInTransaction } = require("../../utils/transaction");
 const env = require("../../config/env");
 const AppError = require("../../utils/AppError");
@@ -28,6 +29,7 @@ const VALID_PAYMENT_TRANSITIONS = {
 };
 
 class PaymentService {
+  static razorpayService = RazorpayService;
   /**
    * Helper to generate a mock Razorpay order ID for test/offline mode
    */
@@ -273,26 +275,38 @@ class PaymentService {
     });
 
     // 4. External Gateway Integration (executed OUTSIDE database transaction)
-    let gatewayOrderId;
+    let gatewayOrder;
     let payment;
     const amountInPaise = Math.round(calculation.summary.grandTotal * 100);
 
     try {
-      gatewayOrderId = this.generateGatewayOrderId();
+      // Create authoritative order directly with official Razorpay Orders API
+      const gatewayClient = PaymentService.razorpayService || RazorpayService;
+      gatewayOrder = await gatewayClient.createOrder({
+        amount: amountInPaise,
+        currency: "INR",
+        receipt: order.orderNumber,
+        notes: {
+          orderId: order._id.toString(),
+          orderNumber: order.orderNumber,
+          userId: userId.toString()
+        }
+      });
 
-      // 5. Create Payment entity in MongoDB
+      // 5. Create Payment entity in MongoDB with official provider-generated order ID
       payment = await Payment.create({
         orderId: order._id,
         userId,
         gateway: "RAZORPAY",
-        gatewayOrderId,
+        gatewayOrderId: gatewayOrder.id,
         amount: amountInPaise,
         currency: "INR",
         status: "CREATED",
         verificationStatus: "PENDING",
         metadata: {
           orderNumber: order.orderNumber,
-          itemCount: order.items.length
+          itemCount: order.items.length,
+          razorpayReceipt: gatewayOrder.receipt
         }
       });
     } catch (gatewayErr) {
@@ -318,14 +332,14 @@ class PaymentService {
 
       throw new AppError(
         `Failed to initialize payment gateway: ${gatewayErr.message}`,
-        HTTP_CODES.INTERNAL_SERVER_ERROR,
-        ERROR_CODES.INTERNAL_ERROR
+        gatewayErr.statusCode || HTTP_CODES.INTERNAL_SERVER_ERROR,
+        gatewayErr.errorCode || ERROR_CODES.INTERNAL_ERROR
       );
     }
 
     const user = await User.findById(userId);
 
-    // 6. Return safe checkout payload
+    // 6. Return safe checkout payload with verified provider order ID
     return {
       order,
       payment,
@@ -333,7 +347,7 @@ class PaymentService {
         orderId: order._id,
         orderNumber: order.orderNumber,
         paymentId: payment._id,
-        razorpayOrderId: gatewayOrderId,
+        razorpayOrderId: gatewayOrder.id,
         amount: amountInPaise,
         currency: "INR",
         paymentExpiresAt: order.paymentExpiresAt,
@@ -592,24 +606,47 @@ class PaymentService {
       );
     }
 
-    // Create a new Razorpay gateway order for the existing amount
-    const gatewayOrderId = this.generateGatewayOrderId();
+    // Create a new Razorpay gateway order on provider API for the existing amount
     const amountInPaise = Math.round(order.priceSummary.grandTotal * 100);
+    let gatewayOrder;
+    let payment;
 
-    const payment = await Payment.create({
-      orderId: order._id,
-      userId,
-      gateway: "RAZORPAY",
-      gatewayOrderId,
-      amount: amountInPaise,
-      currency: "INR",
-      status: "CREATED",
-      verificationStatus: "PENDING",
-      metadata: {
-        isRetry: true,
-        orderNumber: order.orderNumber
-      }
-    });
+    try {
+      const gatewayClient = PaymentService.razorpayService || RazorpayService;
+      gatewayOrder = await gatewayClient.createOrder({
+        amount: amountInPaise,
+        currency: "INR",
+        receipt: `${order.orderNumber}-R`,
+        notes: {
+          orderId: order._id.toString(),
+          orderNumber: order.orderNumber,
+          userId: userId.toString(),
+          isRetry: "true"
+        }
+      });
+
+      payment = await Payment.create({
+        orderId: order._id,
+        userId,
+        gateway: "RAZORPAY",
+        gatewayOrderId: gatewayOrder.id,
+        amount: amountInPaise,
+        currency: "INR",
+        status: "CREATED",
+        verificationStatus: "PENDING",
+        metadata: {
+          isRetry: true,
+          orderNumber: order.orderNumber,
+          razorpayReceipt: gatewayOrder.receipt
+        }
+      });
+    } catch (gatewayErr) {
+      throw new AppError(
+        `Failed to initialize payment gateway retry: ${gatewayErr.message}`,
+        gatewayErr.statusCode || HTTP_CODES.INTERNAL_SERVER_ERROR,
+        gatewayErr.errorCode || ERROR_CODES.INTERNAL_ERROR
+      );
+    }
 
     const user = await User.findById(userId);
 
@@ -620,7 +657,7 @@ class PaymentService {
         orderId: order._id,
         orderNumber: order.orderNumber,
         paymentId: payment._id,
-        razorpayOrderId: gatewayOrderId,
+        razorpayOrderId: gatewayOrder.id,
         amount: amountInPaise,
         currency: "INR",
         paymentExpiresAt: order.paymentExpiresAt,

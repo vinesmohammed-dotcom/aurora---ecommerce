@@ -15,6 +15,7 @@ import OrderService from "../src/modules/orders/order.service";
 import Payment from "../src/modules/payments/payment.model";
 import PaymentEvent from "../src/modules/payments/paymentEvent.model";
 import PaymentService from "../src/modules/payments/payment.service";
+import RazorpayService from "../src/services/razorpay.service";
 
 describe("Phase 6 — Online Payments (Razorpay), Signatures, Webhooks & Retry (Integration Tests)", () => {
   let userACookie;
@@ -161,6 +162,14 @@ describe("Phase 6 — Online Payments (Razorpay), Signatures, Webhooks & Retry (
       const { checkoutInfo } = res.body.data;
       expect(checkoutInfo.orderId).toBeDefined();
       expect(checkoutInfo.razorpayOrderId).toBeDefined();
+      expect(checkoutInfo.razorpayOrderId).toMatch(/^order_[A-Za-z0-9]+$/);
+      // Verify Razorpay Order ID format: starts with order_ followed strictly by alphanumeric characters (no secondary underscore)
+      expect(checkoutInfo.razorpayOrderId.slice(6)).not.toContain("_");
+
+      // Verify the internal Payment document has the exact matching gateway order ID
+      const paymentDoc = await Payment.findOne({ orderId: checkoutInfo.orderId });
+      expect(paymentDoc.gatewayOrderId).toBe(checkoutInfo.razorpayOrderId);
+
       expect(checkoutInfo.amount).toBe(500000); // ₹5,000 * 100 paise = 500,000 paise (free shipping >= ₹1,000)
       expect(checkoutInfo.currency).toBe("INR");
       expect(checkoutInfo.keyId).toBe(env.RAZORPAY_KEY_ID);
@@ -181,6 +190,47 @@ describe("Phase 6 — Online Payments (Razorpay), Signatures, Webhooks & Retry (
       // Cart was cleared
       const cart = await Cart.findOne({ userId: userAId });
       expect(cart.items.length).toBe(0);
+    });
+
+    it("Handles provider order-creation failure gracefully: restores reserved stock, cancels internal order, and returns sanitized error without generating mock order ID", async () => {
+      // 1. Populate cart
+      await Cart.updateOne({ userId: userAId }, { $set: { items: [] } });
+      await request(app)
+        .post("/api/v1/cart/items")
+        .set("Cookie", userACookie)
+        .send({ productId: product1Id, variantId: variant1Id, quantity: 1 });
+
+      const stockBefore = await Product.findById(product1Id);
+      const stockBaseline = stockBefore.variants.id(variant1Id).stock;
+
+      // Mock PaymentService.razorpayService.createOrder to simulate a provider error (e.g. invalid credentials or network rejection)
+      const createOrderSpy = vi.spyOn(PaymentService.razorpayService, "createOrder").mockRejectedValueOnce(
+        new Error("Razorpay API 400 Bad Request: Simulated provider failure")
+      );
+
+      try {
+        const res = await request(app)
+          .post("/api/v1/payments/create")
+          .set("Cookie", userACookie)
+          .send({ addressId: addressAId });
+
+        expect(res.status).toBe(500);
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toContain("Failed to initialize payment gateway");
+        // Verify no checkoutInfo with a fake order ID was returned
+        expect(res.body.data).toBeUndefined();
+
+        // Stock was restored by compensation rollback
+        const stockAfter = await Product.findById(product1Id);
+        expect(stockAfter.variants.id(variant1Id).stock).toBe(stockBaseline);
+
+        // Associated order was cancelled
+        const cancelledOrder = await Order.findOne({ userId: userAId }).sort({ createdAt: -1 });
+        expect(cancelledOrder.orderStatus).toBe("CANCELLED");
+        expect(cancelledOrder.paymentStatus).toBe("FAILED");
+      } finally {
+        createOrderSpy.mockRestore();
+      }
     });
   });
 
